@@ -84,7 +84,7 @@ brimsel-kids-chatbot/
 │   └── metrics.py       in-process latency recorder
 ├── data/curriculum.json the versioned curriculum (content, not code)
 ├── static/              index.html, styles.css, app.js — no build step
-├── tests/               187 tests
+├── tests/               200 tests
 ├── scripts/smoke.py     public-URL smoke test + client-side latency
 ├── scripts/bench_models.py  model latency benchmark
 ├── docs/                this document, the diagram, the demo script
@@ -414,7 +414,7 @@ reported honestly in the [README](../README.md#measured-latency).
 
 ## 11. Testing
 
-**187 tests**, all offline: an autouse fixture strips every API key and installs
+**200 tests**, all offline: an autouse fixture strips every API key and installs
 `NullProvider`, so the suite never touches the network.
 
 | File | Covers |
@@ -425,14 +425,38 @@ reported honestly in the [README](../README.md#measured-latency).
 | `test_engine.py` | whole conversations: level changes, streak reset, refresh persistence, tamper resistance, one-model-call-per-turn |
 | `test_llm.py` | parsing, HTTP 429/500, dead socket, enforced timeout, chain behaviour, thinking-budget payload, provider selection |
 | `test_api.py` | routes, status codes, `X-Response-Time-Ms`, empty input, metrics |
+| `test_static.py` | UI contracts: the `[hidden]` guard, panels starting hidden, the engine panel only reserving a column when open, and a scan proving no key, provider or model name reaches the browser |
 
 The fallback templates are covered by iterating *every* `FallbackContext` and
 asserting the reply is non-empty, child-safe and within budget — so adding a new
 context without a template fails the suite.
 
 ```bash
-python -m pytest        # 187 passed
+python -m pytest        # 200 passed
 ```
+
+### Two UI bugs the browser check caught
+
+The unit suite is fast, but it cannot see a stylesheet. Driving the live app in a
+real headless browser found two genuine defects that no Python test would have:
+
+1. **`.typing { display: flex }` silently defeated `hidden`.** A `display`
+   declaration beats the user agent's `[hidden] { display: none }`, so
+   *"Buddy is thinking…"* was visible on every page load, permanently, layered
+   over the mood buttons. Fixed with an explicit
+   `[hidden] { display: none !important }` guard, and pinned by a test asserting
+   the guard exists — because the failure mode is an edit, not a logic error.
+2. **The chat card was being auto-placed into the narrow column.** The wide
+   layout declared `grid-template-columns: 1fr 340px` unconditionally, with the
+   debug panel placed in column 2 *only when visible*. With the panel hidden
+   (the default), grid auto-placement put the **chat** card in the 340 px column
+   and the mood card in the wide one — exactly backwards, and it swapped when the
+   panel opened. Fixed by gating the second column on `is-debug`, so the aside
+   only reserves space while it is actually open.
+
+Both were verified in the browser by reading back the computed geometry
+(chat and mood card 664 px wide in one column; 786 px with the 380 px panel
+beside them) rather than by eyeballing a screenshot.
 
 ---
 

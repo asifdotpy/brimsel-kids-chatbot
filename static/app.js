@@ -320,6 +320,8 @@
   el.debugToggle.addEventListener("click", () => {
     const open = el.debugPanel.hidden;
     el.debugPanel.hidden = !open;
+    // Wide screens only reserve a column for the panel while it is open.
+    document.querySelector(".layout").classList.toggle("is-debug", open);
     showTags = open;
     el.debugToggle.setAttribute("aria-expanded", String(open));
     refreshTags();

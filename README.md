@@ -135,7 +135,7 @@ budget**, so one provider's rate limit does not cost the child a reply.
 ## Tests
 
 ```bash
-python -m pytest        # 187 passed
+python -m pytest        # 200 passed
 ```
 
 Fully offline: an autouse fixture strips every API key and installs a null
@@ -150,6 +150,7 @@ API is slow.
 | `tests/test_engine.py` | whole conversations end to end: level changes, streak reset, persistence across a refresh, tamper resistance, one model call per turn |
 | `tests/test_llm.py` | parsing, HTTP 429/500, dead socket, enforced wall-clock timeout, provider chain, thinking-budget payload, provider selection |
 | `tests/test_api.py` | routes, status codes, `X-Response-Time-Ms`, empty input, metrics |
+| `tests/test_static.py` | UI contracts: the `[hidden]` guard, panels starting hidden, the engine panel only reserving a column when open, and a scan proving no key, provider or model name reaches the browser |
 
 Every requirement called out in the brief maps to a named test; see
 [`docs/system-design.md`](docs/system-design.md#11-testing).
@@ -160,18 +161,49 @@ Every requirement called out in the brief maps to a named test; see
 
 Measured **end-to-end, client-side**, against the live deployment — including the
 network hop, because that is what a child actually experiences. Reproduce with
-`python scripts/smoke.py <url> --turns 30`.
+`python scripts/smoke.py <url> --turns 60`.
 
-The engine records its own view at `GET /api/metrics`, so these numbers come from
-real traffic rather than a synthetic benchmark.
+The engine also records its own view at `GET /api/metrics`, so these numbers come
+from real traffic rather than a synthetic benchmark.
+
+### End-to-end, client-measured (60 consecutive live turns)
 
 | Metric | Value |
 | --- | --- |
-| Turns measured | _filled in after deployment_ |
-| p50 end-to-end | _filled in after deployment_ |
-| p95 end-to-end | _filled in after deployment_ |
-| Max | _filled in after deployment_ |
-| Model calls succeeded | _filled in after deployment_ |
+| Turns measured | **60** |
+| **p50** | **1058 ms** |
+| **p95** | **1845 ms** |
+| min | 417 ms |
+| max | 3151 ms |
+
+### Server-side, recorded by the engine (120 live turns)
+
+| Metric | Value |
+| --- | --- |
+| Turns | 120 |
+| **p50** | **628 ms** |
+| **p95** | **842 ms** |
+| max | 1803 ms |
+| Model calls | 112 |
+| Model calls that succeeded | **111 (99.1%)** |
+| Turns answered from the deterministic fallback | 9 (7.5%) |
+
+Per mode, server-side p50: Learning 626 ms · Conversation 628 ms · Engagement
+680 ms · **Support 0 ms** (Support never calls the model).
+
+**Reading these numbers honestly.**
+
+- The **p95 of 1.845 s is under the two-second budget**; the p50 of ~1.06 s is
+  roughly 400 ms slower than the server's own p50 because the client measurement
+  includes the TLS connection and network hop to `us-central1`.
+- The **3.151 s maximum is network, not the app.** The engine's own maximum for
+  the same period was 1803 ms — exactly the configured ceiling — so the extra
+  ~1.3 s was spent before the request reached the service. It is a single
+  outlier in 60 turns.
+- **8 of the 9 fallbacks were Support turns, which are designed never to call the
+  model.** One was a genuine model timeout. So the model spoke on 99.1% of the
+  turns where it was actually asked to.
+- Longer runs have not been measured; 60 and 120 turns are the sample sizes.
 
 Two mechanisms keep this bounded, and one decides whether the model speaks:
 
@@ -192,9 +224,9 @@ path. Model benchmark, p50 over 4–5 samples each:
 | Model | p50 |
 | --- | --- |
 | `google/gemini-2.5-flash` (OpenRouter) | 0.90 s |
-| `google/gemini-3.5-flash-lite` (OpenRouter) | 1.34 s |
+| `google/gemini-3.5-flash-lite` (OpenRouter) ← in production | 1.34 s |
 | `openai/gpt-4o-mini` (OpenRouter) | 1.75 s |
-| `gemini-3.5-flash` (Gemini API) | 1.83 s |
+| `gemini-3.5-flash` (Gemini API) ← backup | 1.83 s |
 | `gemini-3.1-flash-lite` (Gemini API) | 2.76 s |
 
 ---
@@ -273,7 +305,7 @@ app/
   metrics.py       in-process latency recorder
 data/curriculum.json   versioned curriculum — content, not code
 static/                index.html, styles.css, app.js — no build step
-tests/                 187 offline tests
+tests/                 200 offline tests
 scripts/smoke.py       public-URL smoke test + client-side latency
 scripts/bench_models.py   model latency benchmark
 docs/                  system design, architecture diagram, demo script
@@ -319,3 +351,19 @@ Dockerfile             one image, one process
   points to a trusted adult.
 - **Read-aloud.** Where the browser supports it, Buddy's replies can be spoken
   for pre-readers.
+
+---
+
+## Live URL
+
+**https://brimsel-kids-chatbot-153163979718.us-central1.run.app**
+
+Deployed on Google Cloud Run (`us-central1`, `min-instances=1`), HTTPS, publicly
+reachable. Health check: [`/api/health`](https://brimsel-kids-chatbot-153163979718.us-central1.run.app/api/health)
+reports the active provider, the model and the curriculum version — never a
+credential.
+
+- Source: <https://github.com/asifdotpy/brimsel-kids-chatbot> (private)
+- Architecture image: [`docs/architecture.png`](docs/architecture.png)
+- Design document: [`docs/system-design.md`](docs/system-design.md)
+- Two-minute demo script: [`docs/demo-script.md`](docs/demo-script.md)

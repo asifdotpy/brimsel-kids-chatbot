@@ -20,6 +20,11 @@
 
 * { box-sizing: border-box; }
 
+/* Several components are flex/grid, and a display rule beats the user-agent's
+   `[hidden] { display: none }`. Without this guard the typing indicator is
+   visible on every page load, mid-sentence. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
@@ -112,14 +117,24 @@ body {
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 1fr);
-  max-width: 980px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 18px clamp(12px, 3vw, 28px) 8px;
 }
 
+/* The engine panel is an aside, so the reading column only widens when the
+   panel is actually open. Placing the debug panel in a fixed second column only
+   when it is visible is what keeps the chat card in the wide column: with an
+   always-on second column the chat card is auto-placed into it and the mood card
+   takes the wide column, which reads backwards. */
 @media (min-width: 1100px) {
-  .layout { grid-template-columns: minmax(0, 1fr) 340px; }
-  .debug { grid-column: 2; grid-row: 1 / span 2; }
+  .layout.is-debug {
+    max-width: 1240px;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    align-items: start;
+  }
+
+  .layout.is-debug .debug { grid-column: 2; grid-row: 1 / span 2; }
 }
 
 /* --------------------------------------------------------------- mood card */
@@ -386,7 +401,7 @@ body {
   flex-wrap: wrap;
   gap: 8px 18px;
   justify-content: space-between;
-  max-width: 980px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 12px clamp(12px, 3vw, 28px) 26px;
   font-size: 14px;
