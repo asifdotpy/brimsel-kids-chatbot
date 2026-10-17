@@ -1,0 +1,14 @@
+# Never ship secrets or local state. Everything else is small enough to include,
+# which keeps the deployed image self-verifying (tests and docs travel with it).
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.local
+*.egg-info/
+.vercel/
+.git/
+.gitignore
+.DS_Store

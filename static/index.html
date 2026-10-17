@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#fff7e6" />
+<title>Buddy - English Friend for Kids</title>
+<link rel="stylesheet" href="/styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧸</text></svg>" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="avatar" aria-hidden="true">🧸</span>
+    <span class="brand-text">
+      <strong>Buddy</strong>
+      <small>your English friend</small>
+    </span>
+  </div>
+
+  <div class="badges">
+    <span class="badge" id="levelBadge" title="Learning level">L1</span>
+    <span class="badge badge-quiet" id="modeBadge" title="What Buddy is doing now">chat</span>
+    <button class="icon-btn" id="soundToggle" type="button" aria-pressed="true" title="Read replies out loud">🔊</button>
+    <button class="icon-btn" id="debugToggle" type="button" aria-expanded="false" title="Show what the engine decided">🔧</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <section class="mood-card" id="moodCard">
+    <p class="mood-title">How do you feel?</p>
+    <div class="mood-row" role="group" aria-label="Choose how you feel">
+      <button class="mood" type="button" data-mood="happy"   aria-label="Happy">😊<span>happy</span></button>
+      <button class="mood" type="button" data-mood="okay"    aria-label="Okay">🙂<span>okay</span></button>
+      <button class="mood" type="button" data-mood="shy"     aria-label="Shy">😳<span>shy</span></button>
+      <button class="mood" type="button" data-mood="tired"   aria-label="Tired">😴<span>tired</span></button>
+      <button class="mood" type="button" data-mood="sad"     aria-label="Sad">😢<span>sad</span></button>
+      <button class="mood" type="button" data-mood="angry"   aria-label="Angry">😠<span>angry</span></button>
+      <button class="mood" type="button" data-mood="scared"  aria-label="Scared">😨<span>scared</span></button>
+      <button class="mood" type="button" data-mood="excited" aria-label="Excited">🤩<span>excited</span></button>
+    </div>
+  </section>
+
+  <section class="chat-card">
+    <div class="chat" id="chat" role="log" aria-live="polite" aria-label="Conversation with Buddy"></div>
+
+    <div class="typing" id="typing" hidden>
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <em>Buddy is thinking...</em>
+    </div>
+
+    <div class="quick-row" role="group" aria-label="Quick things to say">
+      <button class="quick" type="button" data-say="let's learn">📚 Let's learn</button>
+      <button class="quick" type="button" data-say="let's play a game">🎮 Play a game</button>
+      <button class="quick" type="button" data-say="I feel sad">💙 I feel sad</button>
+      <button class="quick" type="button" data-say="hello buddy">👋 Say hi</button>
+    </div>
+
+    <form class="composer" id="composer" autocomplete="off">
+      <label class="sr-only" for="text">Type what you want to say to Buddy</label>
+      <input class="text-input" id="text" name="text" type="text" inputmode="text"
+             placeholder="Type a word here..." maxlength="300" enterkeyhint="send" />
+      <button class="send" id="send" type="submit" aria-label="Send my message">
+        <span aria-hidden="true">Send</span> <span aria-hidden="true">➤</span>
+      </button>
+    </form>
+
+    <p class="tiny-note" id="statusNote" role="status"></p>
+  </section>
+
+  <aside class="debug" id="debugPanel" hidden>
+    <div class="debug-head">
+      <strong>Engine decisions</strong>
+      <span class="debug-actions">
+        <button class="mini" type="button" id="refreshMetrics">metrics</button>
+        <button class="mini" type="button" id="newSession">new session</button>
+      </span>
+    </div>
+    <pre id="debugOut">No turn yet.</pre>
+    <p class="tiny-note">
+      Mode, level, scoring and progression are computed in code. The model only writes the words.
+    </p>
+  </aside>
+
+</main>
+
+<footer class="footer">
+  <span>Prototype for assessment. A grown-up should stay nearby.</span>
+  <span id="buildInfo"></span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

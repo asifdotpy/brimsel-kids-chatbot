@@ -1,0 +1,69 @@
+{
+  "version": "2026.10.1",
+  "description": "Versioned English curriculum for children under 7. Content changes must not require code changes.",
+  "levels": {
+    "1": {
+      "name": "L1",
+      "label": "Words and Sounds",
+      "focus": "letters, colors, animals, single words",
+      "items": [
+        { "id": "l1.word.cat",    "kind": "repeat", "text": "cat",    "ask": "Can you say cat?",              "expect": "cat",    "hint": "It says meow! It starts with c." },
+        { "id": "l1.word.dog",    "kind": "repeat", "text": "dog",    "ask": "Can you say dog?",              "expect": "dog",    "hint": "It says woof woof!" },
+        { "id": "l1.word.hat",    "kind": "repeat", "text": "hat",    "ask": "Can you say hat?",              "expect": "hat",    "hint": "We wear it on our head." },
+        { "id": "l1.word.sun",    "kind": "repeat", "text": "sun",    "ask": "Can you say sun?",              "expect": "sun",    "hint": "It is up in the sky and it is bright." },
+        { "id": "l1.word.ball",   "kind": "repeat", "text": "ball",   "ask": "Can you say ball?",             "expect": "ball",   "hint": "We can roll it and bounce it." },
+        { "id": "l1.word.book",   "kind": "repeat", "text": "book",   "ask": "Can you say book?",             "expect": "book",   "hint": "We look at the pictures in it." },
+        { "id": "l1.word.milk",   "kind": "repeat", "text": "milk",   "ask": "Can you say milk?",             "expect": "milk",   "hint": "We drink it. It is white." },
+        { "id": "l1.word.apple",  "kind": "repeat", "text": "apple",  "ask": "Can you say apple?",            "expect": "apple",  "hint": "It is red and crunchy." },
+        { "id": "l1.color.red",   "kind": "repeat", "text": "red",    "ask": "Can you say red?",              "expect": "red",    "hint": "It is the color of a strawberry." },
+        { "id": "l1.color.blue",  "kind": "repeat", "text": "blue",   "ask": "Can you say blue?",             "expect": "blue",   "hint": "It is the color of the sky." },
+        { "id": "l1.color.green", "kind": "repeat", "text": "green",  "ask": "Can you say green?",            "expect": "green",  "hint": "It is the color of grass." },
+        { "id": "l1.color.yellow","kind": "repeat", "text": "yellow", "ask": "Can you say yellow?",           "expect": "yellow", "hint": "It is the color of a banana." },
+        { "id": "l1.letter.a",    "kind": "repeat", "text": "a",      "ask": "Can you say the letter A?",     "expect": "a",      "hint": "A is for apple." },
+        { "id": "l1.letter.b",    "kind": "repeat", "text": "b",      "ask": "Can you say the letter B?",     "expect": "b",      "hint": "B is for ball." },
+        { "id": "l1.letter.c",    "kind": "repeat", "text": "c",      "ask": "Can you say the letter C?",     "expect": "c",      "hint": "C is for cat." },
+        { "id": "l1.word.mom",    "kind": "repeat", "text": "mom",    "ask": "Can you say mom?",              "expect": "mom",    "hint": "She gives you big hugs." },
+        { "id": "l1.word.star",   "kind": "repeat", "text": "star",   "ask": "Can you say star?",             "expect": "star",   "hint": "It twinkles at night." },
+        { "id": "l1.word.fish",   "kind": "repeat", "text": "fish",   "ask": "Can you say fish?",             "expect": "fish",   "hint": "It swims in the water." },
+        { "id": "l1.word.duck",   "kind": "repeat", "text": "duck",   "ask": "Can you say duck?",             "expect": "duck",   "hint": "It says quack quack!" },
+        { "id": "l1.word.happy",  "kind": "repeat", "text": "happy",  "ask": "Can you say happy?",            "expect": "happy",  "hint": "It is a warm, smiley feeling." }
+      ]
+    },
+    "2": {
+      "name": "L2",
+      "label": "Small Phrases",
+      "focus": "nouns plus verbs, 2 to 3 word phrases",
+      "items": [
+        { "id": "l2.phrase.big_cat",  "kind": "repeat", "text": "the cat is big",  "ask": "Can you say: The cat is big.",  "expect": "the cat is big",  "hint": "Say it slowly: the cat ... is ... big." },
+        { "id": "l2.phrase.see_dog",  "kind": "repeat", "text": "i see a dog",     "ask": "Can you say: I see a dog.",     "expect": "i see a dog",     "hint": "Say it slowly: I ... see ... a dog." },
+        { "id": "l2.phrase.like_apple","kind": "repeat","text": "i like apples",   "ask": "Can you say: I like apples.",   "expect": "i like apples",   "hint": "Say it slowly: I like ... apples." },
+        { "id": "l2.phrase.blue_ball","kind": "repeat", "text": "the ball is blue","ask": "Can you say: The ball is blue.","expect": "the ball is blue","hint": "Say it slowly: the ball is ... blue." },
+        { "id": "l2.phrase.dog_runs", "kind": "repeat", "text": "the dog runs",    "ask": "Can you say: The dog runs.",    "expect": "the dog runs",    "hint": "Say it slowly: the dog ... runs." },
+        { "id": "l2.phrase.happy",    "kind": "repeat", "text": "i am happy",      "ask": "Can you say: I am happy.",      "expect": "i am happy",      "hint": "Say it slowly: I am ... happy." },
+        { "id": "l2.phrase.two_cats", "kind": "repeat", "text": "i see two cats",  "ask": "Can you say: I see two cats.",  "expect": "i see two cats",  "hint": "Count them: one ... two ... cats!" },
+        { "id": "l2.phrase.small_star","kind": "repeat","text": "the star is small","ask": "Can you say: The star is small.","expect": "the star is small","hint": "Say it slowly: the star is ... small." },
+        { "id": "l2.phrase.drink_milk","kind": "repeat","text": "i drink milk",    "ask": "Can you say: I drink milk.",    "expect": "i drink milk",    "hint": "Say it slowly: I drink ... milk." },
+        { "id": "l2.phrase.red_hat",  "kind": "repeat", "text": "my hat is red",   "ask": "Can you say: My hat is red.",   "expect": "my hat is red",   "hint": "Say it slowly: my hat is ... red." },
+        { "id": "l2.phrase.bird_sky", "kind": "repeat", "text": "the bird is in the sky", "ask": "Can you say: The bird is in the sky.", "expect": "the bird is in the sky", "hint": "Say it slowly: the bird is in ... the sky." },
+        { "id": "l2.phrase.sleeping", "kind": "repeat", "text": "the baby is sleeping", "ask": "Can you say: The baby is sleeping.", "expect": "the baby is sleeping", "hint": "Say it slowly: the baby is ... sleeping." }
+      ]
+    },
+    "3": {
+      "name": "L3",
+      "label": "Little Sentences",
+      "focus": "simple sentences, questions, tiny stories",
+      "items": [
+        { "id": "l3.sentence.park",     "kind": "repeat", "text": "i went to the park with my mom", "ask": "Can you say: I went to the park with my mom.", "expect": "i went to the park with my mom", "hint": "Say it in two parts: I went to the park ... with my mom." },
+        { "id": "l3.sentence.rain",     "kind": "repeat", "text": "it is raining and i have an umbrella", "ask": "Can you say: It is raining and I have an umbrella.", "expect": "it is raining and i have an umbrella", "hint": "Say it slowly, and take a breath in the middle." },
+        { "id": "l3.sentence.feelings", "kind": "repeat", "text": "i feel happy when i play with my friends", "ask": "Can you say: I feel happy when I play with my friends.", "expect": "i feel happy when i play with my friends", "hint": "Say it slowly: I feel happy ... when I play with my friends." },
+        { "id": "l3.sentence.sun_moon", "kind": "repeat", "text": "the sun is bright and the moon is soft", "ask": "Can you say: The sun is bright and the moon is soft.", "expect": "the sun is bright and the moon is soft", "hint": "Two parts: the sun is bright ... and the moon is soft." },
+        { "id": "l3.story.duck",        "kind": "repeat", "text": "once there was a little duck who liked to swim", "ask": "Can you say: Once there was a little duck who liked to swim.", "expect": "once there was a little duck who liked to swim", "hint": "Say it in three small parts." },
+        { "id": "l3.open.food",     "kind": "open", "text": "what do you like to eat", "ask": "What do you like to eat?", "accept": ["rice", "mango", "apple", "banana", "egg", "bread", "fish", "chicken", "milk", "cake", "pizza", "noodles", "burger", "orange", "grape", "watermelon", "ice cream", "dal", "soup", "cheese"], "hint": "You can say: I like rice." },
+        { "id": "l3.open.animal",   "kind": "open", "text": "what is your favorite animal", "ask": "What is your favorite animal?", "accept": ["cat", "dog", "cow", "duck", "bird", "fish", "lion", "tiger", "elephant", "rabbit", "horse", "monkey", "frog", "bear"], "hint": "You can say: I like dogs." },
+        { "id": "l3.open.color",    "kind": "open", "text": "what color do you like", "ask": "What color do you like?", "accept": ["red", "blue", "green", "yellow", "pink", "purple", "orange", "black", "white", "brown"], "hint": "You can say: I like blue." },
+        { "id": "l3.open.today",    "kind": "open", "text": "what did you do today", "ask": "What did you do today?", "accept": [], "hint": "You can say: I played with my toys." },
+        { "id": "l3.open.dream",    "kind": "open", "text": "what do you want to be", "ask": "What do you want to be when you grow up?", "accept": ["doctor", "teacher", "pilot", "driver", "singer", "artist", "police", "astronaut", "engineer", "nurse", "farmer", "player", "chef"], "hint": "You can say: I want to be a teacher." }
+      ]
+    }
+  }
+}

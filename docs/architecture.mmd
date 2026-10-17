@@ -1,0 +1,70 @@
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Helvetica, Arial, sans-serif", "fontSize": "14px"}}} }%%
+flowchart TB
+    subgraph BROWSER["Browser - child's device"]
+        UI["index.html + app.js<br/>big buttons, mood faces,<br/>optional speech input, TTS"]
+        LS[("localStorage<br/>opaque session blob")]
+        UI <--> LS
+    end
+
+    subgraph SERVER["One deployable service - FastAPI, single process"]
+        API["POST /api/chat<br/>POST /api/session<br/>GET /api/health · /metrics · /curriculum"]
+
+        subgraph SAFETY["1 · Input safety - text.py"]
+            S1["normalise · profanity / unsafe-topic block<br/>PII scrub · length limit · worry detection"]
+        end
+
+        subgraph MODE["2 · Mode selection - modes.py (no LLM)"]
+            M1{"Support > Engagement<br/>&gt; Conversation > Learning"}
+        end
+
+        subgraph TEACH["3 · Teaching decisions - progression.py (no LLM)"]
+            T1["score the answer<br/>mastery box 0..3"]
+            T2["promote · ease · demote<br/>8 attempts and 4 of last 5"]
+            T3["pick next item"]
+        end
+
+        subgraph PROMPT["4 · Prompt builder - prompts.py"]
+            P1["SYSTEM_PROMPT<br/>+ one COPY directive<br/>+ short context block"]
+        end
+
+        subgraph FALLBACK["5 · Deterministic fallback - fallbacks.py"]
+            F1["child-safe template reply,<br/>always ready before the model runs"]
+        end
+
+        subgraph OUT["6 · Output safety - text.py"]
+            O1["block lists · overreach filter<br/>sentence and character budget"]
+        end
+    end
+
+    subgraph LLM["Model - the only non-deterministic part"]
+        CH{"ChainProvider<br/>budget shared, one success"}
+        PR1["primary: OpenRouter<br/>google/gemini-3.5-flash-lite"]
+        PR2["backup: Gemini API<br/>gemini-3.5-flash"]
+        CH --> PR1
+        CH -. "fast failure only,\nbudget remains" .-> PR2
+    end
+
+    UI -->|"message + session blob"| API
+    API --> S1
+    S1 --> M1
+    M1 -->|"Learning"| TEACH
+    M1 -->|"Support / Engagement / Conversation"| PROMPT
+    T1 --> T2 --> T3 --> PROMPT
+    PROMPT --> F1
+    PROMPT -->|"only when needed"| CH
+    CH -->|"reply or failure"| O1
+    F1 --> O1
+    O1 -->|"reply + updated session"| API
+    API -->|"reply + updated session"| UI
+
+    SAFETY -. "Support mode and unsafe input<br/>never reach the model" .-> F1
+
+    classDef store fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b
+    classDef model fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef deterministic fill:#dcfce7,stroke:#16a34a,color:#052e16
+    classDef boundary fill:#f8fafc,stroke:#94a3b8,color:#0f172a
+
+    class LS store
+    class CH,PR1,PR2 model
+    class S1,M1,T1,T2,T3,P1,F1,O1 deterministic
+    class API,UI boundary
