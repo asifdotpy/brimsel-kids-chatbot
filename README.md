@@ -9,7 +9,9 @@ progress is made by deterministic code, not by a language model.
 A slow API, a rate limit, a hallucination or a total provider outage cannot move
 a child up a level, mark them wrong, or leave them without a reply.
 
-**Live:** _see the "Live URL" section at the bottom of this file._
+**Live:** _see the ["Live URL"](#live-url) section at the bottom of this file._
+
+![The child's view: mood check-in, Buddy's greeting, tappable suggestions and a text box that works without a microphone](docs/ui.png)
 
 ---
 
@@ -25,6 +27,7 @@ a child up a level, mark them wrong, or leave them without a reply.
 - [Project layout](#project-layout)
 - [Security and privacy](#security-and-privacy)
 - [Accessibility and child-safety choices](#accessibility-and-child-safety-choices)
+- [Live URL](#live-url)
 
 ---
 
@@ -308,7 +311,7 @@ static/                index.html, styles.css, app.js — no build step
 tests/                 200 offline tests
 scripts/smoke.py       public-URL smoke test + client-side latency
 scripts/bench_models.py   model latency benchmark
-docs/                  system design, architecture diagram, demo script
+docs/                  system design, architecture diagram, UI shot, demo script
 Dockerfile             one image, one process
 ```
 
