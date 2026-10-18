@@ -210,6 +210,33 @@ def _evaluate_open(reply: str, item) -> bool | None:
     return word_count(reply) >= 2
 
 
+def attempts_item(reply: str, item) -> bool:
+    """True when *reply* is aimed at *item* rather than at small talk.
+
+    This is **not** scoring: it answers "did the child mean to answer this
+    question?", which is what mode detection needs. It exists because two
+    level-3 sentence drills read exactly like personal news — *"I went to the
+    park with my mom"* and *"it is raining and I have an umbrella"* — so the
+    incidental Conversation signal used to win, the item was never scored, and
+    the child could never finish the level they were standing on. A level-1 word
+    inside a chatty sentence ("I have a cat" for "cat") is the same case.
+
+    Open items are questions and are recognised by their ``accept`` list
+    elsewhere, so they always return ``False`` here.
+    """
+    if item.kind == "open":
+        return False
+    if is_non_answer(reply):
+        return False
+    expected = item.expect or item.text
+    if not expected or not normalize(reply):
+        return False
+    if contains_tokens(expected, reply):
+        return True
+    # A near-miss at a whole sentence still belongs to the drill, not to chat.
+    return word_count(expected) > 1 and similarity(expected, reply) >= CORRECT_SIMILARITY
+
+
 # --------------------------------------------------------------------------
 # Safety: input
 # --------------------------------------------------------------------------

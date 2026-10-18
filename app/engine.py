@@ -40,7 +40,7 @@ from .state import (
     set_mode,
     utcnow,
 )
-from .text import InputVerdict, evaluate_answer, sanitize_input, sanitize_output
+from .text import InputVerdict, attempts_item, evaluate_answer, sanitize_input, sanitize_output
 
 HIDDEN_TEXT = "[hidden for safety]"
 
@@ -128,6 +128,7 @@ def plan_turn(
             previous_mode=previous_mode,
             worry=verdict.worry,
             turn_count=state["turn_count"],
+            attempts_pending=attempts_item(child_text, pending_item) if pending_item else False,
         )
     )
     mode, reason = decision.mode, decision.reason

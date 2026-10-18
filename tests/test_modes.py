@@ -91,6 +91,50 @@ def test_personal_news_beats_learning():
     assert decision.reason == "personal_news"
 
 
+def test_the_prompt_being_answered_beats_the_personal_news_signal():
+    """Two level-3 sentence drills read exactly like personal news.
+
+    Without this, the child says the sentence they were asked for, the engine
+    reads it as small talk, the item is never scored, and the level can never be
+    finished.
+    """
+    decision = detect_mode(ModeInputs(
+        text="I went to the park with my mom",
+        pending_item={"id": "l3.sentence.park", "kind": "repeat", "accept": []},
+        attempts_pending=True,
+    ))
+    assert decision.mode == LEARNING
+    assert decision.reason == "answering_prompt"
+
+
+def test_the_prompt_being_answered_beats_the_greeting_signal():
+    decision = detect_mode(ModeInputs(
+        text="hello", pending_item=REPEAT_ITEM, attempts_pending=True,
+    ))
+    assert decision.mode == LEARNING
+    assert decision.reason == "answering_prompt"
+
+
+def test_support_still_outranks_answering_the_prompt():
+    """The stated priority is untouched: comfort always wins."""
+    decision = detect_mode(ModeInputs(
+        text="I went to the park but I am sad",
+        pending_item=REPEAT_ITEM,
+        attempts_pending=True,
+    ))
+    assert decision.mode == SUPPORT
+
+
+def test_the_anti_drill_break_still_outranks_answering_the_prompt():
+    decision = detect_mode(ModeInputs(
+        text="I went to the park with my mom",
+        pending_item=REPEAT_ITEM,
+        attempts_pending=True,
+        learn_streak=MAX_LEARN_STREAK,
+    ))
+    assert decision.mode == ENGAGEMENT
+
+
 def test_off_topic_question_beats_learning():
     decision = detect_mode(ModeInputs(text="why is the sky blue?", pending_item=REPEAT_ITEM))
     assert decision.mode == CONVERSATION

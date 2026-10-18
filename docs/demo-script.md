@@ -126,7 +126,7 @@ you."
 
 ## Numbers to have ready
 
-- **200** offline tests.
+- **225** offline tests.
 - **p50 ≈ 1.0 s, p95 ≈ 1.6 s** end-to-end measured client-side against the live
   deployment; see the README for sample size and limitations.
 - Hard per-call ceiling: **1800 ms**.

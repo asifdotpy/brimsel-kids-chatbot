@@ -12,6 +12,7 @@ from app.text import (
     MAX_OUTPUT_SENTENCES,
     BLOCK_TERMS,
     FALLBACK_SAFE_REPLY,
+    attempts_item,
     detect_worry,
     evaluate_answer,
     normalize,
@@ -264,3 +265,49 @@ def test_a_letter_target_is_not_credited_by_a_longer_word():
 def test_open_question_scoring(reply, expected):
     item = _item(kind="open", text="what do you like to eat", expect="", accept=["rice", "apple"])
     assert evaluate_answer(reply, item) is expected
+
+
+# ------------------------------------------------- is this an attempt at all?
+
+SENTENCE = "i went to the park with my mom"
+
+
+@pytest.mark.parametrize(
+    "reply,expected",
+    [
+        # A drill that reads like personal news is still the drill.
+        ("I went to the park with my mom", True),
+        ("it is raining and i have an umbrella", False),   # a different item's text
+        ("I went to the park with my mother", True),        # near-miss of the sentence
+        # Genuine small talk is not an attempt.
+        ("I went to the beach", False),
+        ("my mom made a cake", False),
+        ("hello", False),
+        ("I don't know", False),
+        ("", False),
+    ],
+)
+def test_recognising_an_attempt_at_a_sentence_prompt(reply, expected):
+    """``attempts_item`` answers "did they mean to answer?", never "was it right?"."""
+    item = _item(text=SENTENCE, expect=SENTENCE)
+    assert attempts_item(reply, item) is expected
+
+
+@pytest.mark.parametrize(
+    "reply,expected",
+    [
+        ("I have a cat", True),          # a level-1 word inside a chatty sentence
+        ("cat", True),
+        ("the cat is big now", True),
+        ("I have a new bike", False),    # personal news that contains no target
+        ("dog", False),
+    ],
+)
+def test_recognising_an_attempt_at_a_single_word_prompt(reply, expected):
+    assert attempts_item(reply, _item()) is expected
+
+
+def test_an_open_item_is_never_an_attempt_here():
+    """Open questions are recognised by their accept list elsewhere."""
+    item = _item(kind="open", text="what do you like to eat", expect="", accept=["rice"])
+    assert attempts_item("I like rice", item) is False

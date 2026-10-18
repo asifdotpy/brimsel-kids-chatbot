@@ -57,6 +57,10 @@ class ModeInputs:
     previous_mode: str | None = None
     worry: bool = False
     turn_count: int = 0
+    # Set by the engine when the reply is recognisably aimed at the pending
+    # item. Mode detection cannot work this out for itself: it is handed a
+    # minimal item view on purpose, so that it can never score an answer.
+    attempts_pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -197,10 +201,23 @@ def detect_mode(inputs: ModeInputs) -> ModeDecision:
             return ModeDecision(ENGAGEMENT, "long_pause", answering)
 
     # ----------------------------------------------------------- Conversation
-    if is_greeting(text):
+    # Two of the level-3 sentence drills read like personal news ("I went to the
+    # park with my mom", "it is raining and I have an umbrella"), and a level-1
+    # word can arrive inside a chatty sentence ("I have a cat"). When the child
+    # is answering the prompt they were given, the drill wins over the
+    # incidental small-talk signal, otherwise the item could never be scored and
+    # the child would be stuck on that level. This does not weaken the stated
+    # priority: Support and Engagement are checked above and are unaffected, and
+    # genuinely conversational turns that are not an attempt at the prompt still
+    # land in Conversation.
+    answering_the_prompt = answering and (
+        inputs.attempts_pending or _answers_open_item(text, inputs.pending_item)
+    )
+
+    if is_greeting(text) and not answering_the_prompt:
         return ModeDecision(CONVERSATION, "greeting", answering)
 
-    if is_personal_news(text):
+    if is_personal_news(text) and not answering_the_prompt:
         return ModeDecision(CONVERSATION, "personal_news", answering)
 
     if looks_like_question(text) and not _answers_open_item(text, inputs.pending_item):

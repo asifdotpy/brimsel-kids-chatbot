@@ -290,3 +290,49 @@ def test_promotion_happens_through_real_turns(drive, curriculum):
 
     assert promoted, "eight correct attempts should promote the child"
     assert state["level"] == 2
+
+
+# ------------------------------------------------- content that reads like chat
+
+@pytest.mark.parametrize(
+    "item_id",
+    ["l3.sentence.park", "l3.sentence.rain", "l3.sentence.feelings", "l3.story.duck"],
+)
+def test_level_three_sentence_drills_can_actually_be_answered(drive, curriculum, item_id):
+    """Regression: these sentences read like personal news.
+
+    "I went to the park with my mom" matches the personal-news markers ("i went",
+    "my mom"), and "it is raining and I have an umbrella" matches "i have". The
+    engine therefore rerouted the child's correct answer to Conversation, never
+    scored it, and the child could not finish the level they were standing on.
+    """
+    item = curriculum.get(item_id)
+    state = start_session().state
+    state["level"] = 3
+    state["pending_item"] = item_id
+
+    result = drive(state, item.expect)
+
+    assert result.debug["mode"] == "Learning", f"{item_id} must be scored, not small talk"
+    assert result.debug["correct"] is True
+    assert result.state["attempts_at_level"] == 1
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["I went to the beach", "my mom made a cake", "I have a new bike"],
+)
+def test_real_personal_news_is_still_conversation_while_a_question_is_pending(drive, message):
+    """The fix must not swallow ordinary chat just because a drill is open."""
+    state = start_session().state
+    state["pending_item"] = "l1.word.cat"
+
+    result = drive(state, message)
+
+    assert result.debug["mode"] == "Conversation"
+    assert result.debug["correct"] is None
+    # The question is deliberately dropped rather than re-asked: a child who
+    # wanders off topic should not be nagged, and the weak item keeps its
+    # mastery box, so it comes back on its own within the session.
+    assert result.state["pending_item"] is None
+    assert result.state["attempts_at_level"] == 0

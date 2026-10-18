@@ -138,7 +138,7 @@ budget**, so one provider's rate limit does not cost the child a reply.
 ## Tests
 
 ```bash
-python -m pytest        # 200 passed
+python -m pytest        # 225 passed
 ```
 
 Fully offline: an autouse fixture strips every API key and installs a null
@@ -308,9 +308,10 @@ app/
   metrics.py       in-process latency recorder
 data/curriculum.json   versioned curriculum — content, not code
 static/                index.html, styles.css, app.js — no build step
-tests/                 200 offline tests
+tests/                 225 offline tests
 scripts/smoke.py       public-URL smoke test + client-side latency
 scripts/bench_models.py   model latency benchmark
+scripts/progression_check.py  drives a live deployment L1 -> L2 -> L3
 docs/                  system design, architecture diagram, UI shot, demo script
 Dockerfile             one image, one process
 ```

@@ -84,9 +84,10 @@ brimsel-kids-chatbot/
 │   └── metrics.py       in-process latency recorder
 ├── data/curriculum.json the versioned curriculum (content, not code)
 ├── static/              index.html, styles.css, app.js — no build step
-├── tests/               200 tests
+├── tests/               225 tests
 ├── scripts/smoke.py     public-URL smoke test + client-side latency
 ├── scripts/bench_models.py  model latency benchmark
+├── scripts/progression_check.py  drives a live deployment L1 -> L2 -> L3
 ├── docs/                this document, the diagram, the demo script
 └── Dockerfile           one image, one process
 ```
@@ -170,6 +171,20 @@ disengagement. Both `short_replies` and `repeat_count` are suppressed while the
 child is answering a pending item, so brevity during practice cannot be
 misread as boredom.
 
+### When the drill text reads like small talk
+
+Two level-3 drills are literal sentences — *"I went to the park with my mom"* and
+*"it is raining and I have an umbrella"* — and both match the personal-news
+lexicon (`i went`, `my mom`, `i have`). Any level-1 word can arrive the same way
+("I have a cat" for `cat`). Mode detection is therefore handed one extra boolean:
+whether the reply is recognisably aimed at the pending item, computed by
+`attempts_item()`, which asks *"did they mean to answer?"* and never *"was it
+right?"*.
+
+That flag can only move a turn from Conversation to Learning. Support and
+Engagement are evaluated before it, so the priority order and the 3-turn ceiling
+are unchanged, and the flag is `False` whenever there is no pending item.
+
 ### Support is a floor, not a feature
 
 Support outranks everything, including a pending question. A child who is asked
@@ -218,6 +233,12 @@ an attempt**. Promotion cannot be farmed by spamming the send button.
 
 `evaluate_answer()` returns three-valued logic: `True`, `False`, or `None` for
 "no usable answer", which the engine treats as a re-ask rather than a failure.
+
+A second, deliberately separate function — `attempts_item()` — answers a
+different question for mode detection: whether the reply is *aimed at* the
+pending item. It is not scoring, and keeping the two apart is what lets a
+correct answer to a sentence that reads like small talk still be scored. See
+[§4](#when-the-drill-text-reads-like-small-talk).
 
 **Closed items (`repeat`)** — the child must say the target word or phrase:
 
@@ -414,7 +435,7 @@ reported honestly in the [README](../README.md#measured-latency).
 
 ## 11. Testing
 
-**200 tests**, all offline: an autouse fixture strips every API key and installs
+**225 tests**, all offline: an autouse fixture strips every API key and installs
 `NullProvider`, so the suite never touches the network.
 
 | File | Covers |
@@ -432,13 +453,15 @@ asserting the reply is non-empty, child-safe and within budget — so adding a n
 context without a template fails the suite.
 
 ```bash
-python -m pytest        # 200 passed
+python -m pytest        # 225 passed
 ```
 
-### Two UI bugs the browser check caught
+### Three bugs that reached a real conversation
 
-The unit suite is fast, but it cannot see a stylesheet. Driving the live app in a
-real headless browser found two genuine defects that no Python test would have:
+The unit suite is fast, but it cannot see a stylesheet, and it cannot easily
+notice that a *correct* answer never gets scored. Driving the live app in a real
+browser and the live API through a full promotion path found three genuine
+defects that no unit test had:
 
 1. **`.typing { display: flex }` silently defeated `hidden`.** A `display`
    declaration beats the user agent's `[hidden] { display: none }`, so
@@ -453,6 +476,32 @@ real headless browser found two genuine defects that no Python test would have:
    and the mood card in the wide one — exactly backwards, and it swapped when the
    panel opened. Fixed by gating the second column on `is-debug`, so the aside
    only reserves space while it is actually open.
+3. **Two level-3 sentence drills could never be completed.** The curriculum
+   sentences *"I went to the park with my mom"* and *"it is raining and I have an
+   umbrella"* match the personal-news markers (`i went`, `my mom`, `i have`).
+   Mode detection therefore classified the child's **correct** answer as
+   Conversation, the item was never scored, no attempt was recorded, and the
+   child sat at level 3 forever without ever clearing a sentence. The same
+   collision would hit any level-1 word said inside a chatty sentence ("I have a
+   cat" for `cat`).
+
+   The fix keeps the stated priority intact. The engine computes
+   `attempts_item(reply, item)` — *"did the child mean to answer this
+   question?"*, not *"was it right?"* — and passes it to mode detection as
+   `attempts_pending`. When the child is mid-exercise and the utterance is
+   recognisably aimed at the prompt, the drill wins over the incidental
+   small-talk signal. **Support and Engagement are checked first and are
+   untouched**, so a distressed child is still comforted and the 3-turn ceiling
+   still fires; and a genuinely unrelated remark ("I went to the beach") still
+   lands in Conversation, which drops the question rather than nagging.
+
+   This one was caught by `scripts/progression_check.py`, which drives a live
+   deployment all the way from L1 to L3. Its first version was itself wrong: it
+   sent "let's learn" before each answer, not realising that a message sent while
+   a question is pending is *scored as an answer to that question*. Every second
+   turn was recorded as a miss, the 4-of-5 window never filled, and promotion
+   correctly never fired — which looked exactly like a progression bug. Answering
+   the pending item directly is the only faithful way to drive the engine.
 
 Both were verified in the browser by reading back the computed geometry
 (chat and mood card 664 px wide in one column; 786 px with the 380 px panel
