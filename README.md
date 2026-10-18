@@ -269,6 +269,7 @@ it, is the model asked to speak. `finalize_turn()` filters whatever comes back a
 commits the turn.
 
 - Full design: [`docs/system-design.md`](docs/system-design.md)
+- The agreed design page, exported: [`docs/brimsel-brief.md`](docs/brimsel-brief.md)
 - Diagram source: [`docs/architecture.mmd`](docs/architecture.mmd)
 - Two-minute demo script: [`docs/demo-script.md`](docs/demo-script.md)
 
@@ -337,7 +338,8 @@ tests/                 225 offline tests
 scripts/smoke.py       public-URL smoke test + client-side latency
 scripts/bench_models.py   model latency benchmark
 scripts/progression_check.py  drives a live deployment L1 -> L2 -> L3
-docs/                  system design, architecture diagram, UI shot, demo script
+docs/                  design docs, the brief export, architecture diagram,
+                       UI screenshot, demo script
 Dockerfile             one image, one process
 ```
 
