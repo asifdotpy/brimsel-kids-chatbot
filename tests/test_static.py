@@ -160,6 +160,21 @@ def test_a_superseded_speech_request_never_plays_over_a_newer_reply():
     )
 
 
+def test_the_client_does_not_wait_indefinitely_for_audio():
+    """Cold synthesis measured ~3.3s p50, with a tail past 8s.
+
+    The child prefers the neural voice, so waiting is right - but the client must
+    not sit in silence. The wait is bounded, then the browser voice takes over.
+    """
+    match = re.search(r"SPEECH_TIMEOUT_MS\s*=\s*(\d+)", JS)
+    assert match, "app.js must bound how long it waits for server audio"
+    timeout_ms = int(match.group(1))
+    assert 2000 <= timeout_ms <= 6000, (
+        f"the audio wait is {timeout_ms}ms; too short wastes the good voice, too "
+        "long leaves the child in silence"
+    )
+
+
 def test_a_level_jump_does_not_answer_its_own_question():
     """The jump already asks a level-appropriate item.
 

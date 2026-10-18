@@ -452,9 +452,10 @@ Neither is on the critical path, so neither appears in the turn numbers above.
 
 | Measurement | Result |
 | --- | --- |
-| Cold synthesis, two-sentence reply | 1984 ms server |
-| Cache hit | 0 ms server, ~390 ms client (pure hop) |
-| Timeout ceiling | 8000 ms, then the browser voice takes over |
+| Cold synthesis, short reply (**n=6**) | **p50 3311 ms** (min 2606, max 4910) server |
+| Cache hit | **0 ms** server, ~390–500 ms client (pure hop) |
+| Client wait, then browser voice | 5000 ms |
+| Server ceiling | 8000 ms (`SPEECH_TIMEOUT_MS`) |
 | Layout at 1366×768 / 1280×720 / 390×844 | page never scrolls; composer always visible; only the message list scrolls |
 
 A local run against the same code timed out model calls at exactly the 1805 ms
@@ -494,7 +495,7 @@ this limitation are reported honestly in the [README](../README.md#measured-late
 
 ## 11. Testing
 
-**287 tests**, all offline: an autouse fixture strips every API key and installs
+**288 tests**, all offline: an autouse fixture strips every API key and installs
 `NullProvider`, so the suite never touches the network. It also swaps the speech
 service for a disabled one, because `edge-tts` *is* installed in the development
 venv and a speech test would otherwise reach the real synthesiser.
@@ -674,11 +675,13 @@ believed.
 - Provider health is not monitored beyond per-turn failover. A sustained outage
   degrades to deterministic replies — acceptable for this scale, but a real
   deployment would want alerting on the fallback rate.
-- **Cold synthesized audio starts about two seconds after the reply appears.** A
-  cache hit is instant and the cache fills fast, but a *new* phrase pays the
-  synthesis cost. Measured on the live revision: 1984 ms for a two-sentence reply,
-  0 ms on a repeat. The reply text is always on screen first, and a superseded
-  speech request is dropped rather than played over a newer reply.
+- **Cold synthesized audio starts about three seconds after the reply appears.**
+  A cache hit is instant and the cache fills fast, but a *new* phrase pays the
+  synthesis cost. Measured on the live revision over six short phrases: p50
+  3311 ms, max 4910 ms, and one earlier sample exceeded the 8 s ceiling and fell
+  back. The client waits 5 s and then uses the browser voice. The reply text is
+  always on screen first, and a superseded speech request is dropped rather than
+  played over a newer reply.
 - **The lead model is a free tier.** The OpenRouter key this project started on
   reported `is_free_tier: true` with `total_credits: 0` while pointed at a *paid*
   model, so it worked on an undocumented allowance and could have failed silently.
@@ -751,7 +754,8 @@ it did, until a test caught it (section 11, bug 6).
 
 ### The cache is part of the design, not an optimisation
 
-A cold synthesis costs about **two seconds** from a data centre; a hit costs
+A cold synthesis costs about **three seconds** from a data centre (p50 3311 ms
+over six phrases; the spread is wide and the tail exceeds 8 s); a hit costs
 **0 ms** of server time. That gap is the difference between a child waiting and a
 child hearing Buddy straight away, so the LRU cache (512 entries, keyed by voice,
 prosody and text) is load-bearing. The vocabulary is small, so it fills quickly.

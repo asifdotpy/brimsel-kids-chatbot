@@ -224,7 +224,7 @@ are removed, and the text is capped at 400 characters.
 ## Tests
 
 ```bash
-python -m pytest        # 287 passed
+python -m pytest        # 288 passed
 ```
 
 Fully offline: an autouse fixture strips every API key and installs a null
@@ -355,10 +355,12 @@ Reproduce with `python scripts/speech_probe.py --base <url>`.
 
 | Measurement | Result |
 | --- | --- |
-| Cold synthesis, two-sentence reply | **1984 ms** server |
-| Cold synthesis, short one-sentence reply | **2276 ms** server |
-| Cache hit (`X-Speech-Cached: 1`) | **0 ms** server, ~390 ms client (pure hop) |
-| Timeout ceiling | 8000 ms, then the client falls back to the browser voice |
+| Cold synthesis, short reply (**n=6**) | **p50 3311 ms**, min 2606 ms, max 4910 ms (server) |
+| Cold synthesis, two-sentence reply | 1984 ms server in one sample; the spread above is more honest |
+| One cold call exceeded the 8 s ceiling | the client fell back to the browser voice, as designed |
+| Cache hit (`X-Speech-Cached: 1`) | **0 ms** server, ~390–500 ms client (pure hop) |
+| Client wait before falling back | **5000 ms**, then the browser voice speaks |
+| Server ceiling | 8000 ms (`SPEECH_TIMEOUT_MS`) |
 
 | Reply style | Audio length (bytes ÷ 6000) |
 | --- | --- |
@@ -379,13 +381,15 @@ Reproduce with `python scripts/speech_probe.py --base <url>`.
   rate is verified that way, and the probe includes a control (3× the text must
   give ~3× the bytes) so the measurement cannot quietly become meaningless.
 
-**Honest limitation: cold audio starts ~2 seconds after the reply appears.** A
-cache hit is instant, and the cache fills quickly because the vocabulary is small,
-but a *new* phrase costs about two seconds of synthesis before the first sound. Two
-things bound the damage: the text is always on screen first, and a superseded
-speech request is dropped rather than played over a newer reply. Streaming the
-audio to the browser as it is produced (rather than buffering the whole MP3) is the
-obvious next step and was not implemented.
+**Honest limitation: cold audio starts roughly three seconds after the reply
+appears.** Measured over six short phrases: **p50 3311 ms**, min 2606 ms, max
+4910 ms, and one earlier sample exceeded the 8 s server ceiling and fell back. A
+cache hit is instant and the cache fills quickly, because the vocabulary is small
+— so a *repeat* is free, but a *new* phrase costs about three seconds of synthesis.
+The client waits **5 s** and then falls back to the browser voice, deliberately: the
+child prefers the good voice, so waiting is right, but waiting 12 s in silence is
+not. Streaming the audio to the browser as it is produced (rather than buffering
+the whole MP3) is the obvious next step and was not implemented.
 
 The first version of this voice — the browser's own `SpeechSynthesis` — was the
 "absolutely robotic" audio in the bug report. It is now the fallback, not the
@@ -487,7 +491,7 @@ app/
   metrics.py       in-process latency recorder
 data/curriculum.json   versioned curriculum — content, not code
 static/                index.html, styles.css, app.js — no build step
-tests/                 287 offline tests
+tests/                 288 offline tests
 scripts/smoke.py       public-URL smoke test + client-side latency
 scripts/bench_models.py   model latency benchmark
 scripts/progression_check.py  drives a live deployment L1 -> L2 -> L3

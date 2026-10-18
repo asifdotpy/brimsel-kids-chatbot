@@ -20,7 +20,13 @@
   const VOICE_KEY = "buddy.voice.v1";
   const SPEED_KEY = "buddy.speed.v1";
   const REQUEST_TIMEOUT_MS = 20000;
-  const SPEECH_TIMEOUT_MS = 12000;
+  // How long to wait for the neural voice before giving up on it. Measured cold
+  // synthesis has a p50 of ~3.3s and a tail past 8s. The child prefers the good
+  // voice (the whole reason it was added), so waiting is right - but not for 12s
+  // in silence. 5s covers the measured p50 by a wide margin and then falls back
+  // to the browser voice, which is instant. A phrase does not stay uncached:
+  // repeats are served in 0 ms, so the second time the child hears the good one.
+  const SPEECH_TIMEOUT_MS = 5000;
 
   const el = {
     chat: document.getElementById("chat"),

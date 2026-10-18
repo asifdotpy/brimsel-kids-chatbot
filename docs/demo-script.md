@@ -143,14 +143,15 @@ still gets a safe reply. One container, one process, no database. Thank you."
 
 ## Numbers to have ready
 
-- **287** offline tests.
+- **288** offline tests.
 - **App turn time: p50 589 ms, p95 792 ms, hard-capped at 1804 ms** — 417 live
   turns as recorded by the engine itself.
 - **End-to-end from a workstation: p50 ≈ 1.08 s, p95 ≈ 1.3–1.6 s**, of which
   ≈0.45 s is the network hop (measured with bare `GET /api/health` probes).
 - **99.2%** of model calls succeeded (388/391); the fallback spoke on 7% of
   turns, and 26 of those 29 were Support turns that never call the model.
-- **Speech:** ~2 s to synthesize a new phrase, **0 ms** on a cache hit. Measured
+- **Speech:** cold synthesis p50 **3.3 s** (n=6, max 4.9 s), **0 ms** on a cache hit.
+  The client waits 5 s, then the browser voice speaks. Measured
   with `scripts/speech_probe.py`.
 - **Layout:** the page never scrolls at 1366×768, 1280×720 or 390×844; the composer
   is always inside the viewport. Measured with `scripts/layout_check.js`.
