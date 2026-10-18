@@ -22,12 +22,23 @@ from app.state import new_state  # noqa: E402
 @pytest.fixture(autouse=True)
 def no_network_llm(monkeypatch):
     """Guarantee no test ever reaches a real model endpoint."""
-    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"):
+    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("LLM_PROVIDER", "none")
+    monkeypatch.setenv("SPEECH_PROVIDER", "none")
     import app.engine as engine_module
 
     monkeypatch.setattr(engine_module, "provider_from_env", lambda env=None: NullProvider())
+
+    # edge-tts is installed in this venv, so a speech test would otherwise reach
+    # the real synthesiser. Swap the module-level service for a disabled one; the
+    # endpoint then answers 503 and the client falls back, which is also the
+    # behaviour worth testing.
+    from app.main import app as fastapi_app  # noqa: F401
+    import app.main as main_module
+    from app.speech import SpeechService
+
+    monkeypatch.setattr(main_module, "_speech", SpeechService(enabled=False))
 
 
 @pytest.fixture

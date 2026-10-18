@@ -1,21 +1,39 @@
 /* Buddy - kid-first styling.
-   Priorities: big tap targets, high contrast, large readable text, calm layout.
-   No external fonts or assets so the page loads fast and works offline. */
+ *
+ * Two constraints pull against each other and both are non-negotiable:
+ *   1. The brief requires large controls and readable text for children.
+ *   2. The whole app has to fit a 1366x768 laptop at 100% zoom, with the input
+ *      box always visible.
+ *
+ * The earlier version satisfied only (1): every size was a fixed pixel value
+ * (22px body text, 64px targets), which is about 1.4x a normal page, so a small
+ * laptop needed 67% browser zoom to see the whole thing. Sizes are now fluid
+ * (clamp + vh) so the layout adapts to the viewport instead of forcing the user
+ * to zoom out, and nothing drops below the accessibility floor:
+ *   - body text      >= 15px
+ *   - tap targets    >= 48px  (WCAG 2.5.5 asks for 44px)
+ *
+ * Scrolling: there is exactly ONE scrollable region, the message list. The page
+ * itself never scrolls (`body { overflow: hidden }`), so the composer stays put.
+ * Previously `.chat { max-height: 56vh }` sat above the composer in normal flow,
+ * which made the *page* scroll as well as the message list.
+ */
 
 :root {
   --cream: #fff7e6;
   --sky: #dff1ff;
   --ink: #23324a;
   --ink-soft: #5b6b85;
+  --line: rgba(35, 50, 74, .12);
   --buddy: #ffffff;
   --child: #4f7cff;
   --child-ink: #ffffff;
   --accent: #ffb703;
   --ok: #18a558;
   --warn: #e5484d;
-  --radius: 26px;
-  --tap: 64px;
-  --shadow: 0 6px 0 rgba(35, 50, 74, .12);
+  --radius: 18px;
+  --tap: 48px;
+  --shadow: 0 4px 0 rgba(35, 50, 74, .10);
 }
 
 * { box-sizing: border-box; }
@@ -25,18 +43,18 @@
    visible on every page load, mid-sentence. */
 [hidden] { display: none !important; }
 
-html, body {
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
-}
+html, body { margin: 0; padding: 0; }
 
 body {
-  background: linear-gradient(180deg, var(--cream) 0%, var(--sky) 100%) fixed;
+  height: 100dvh;
+  overflow: hidden;                 /* one scroll area only: the message list */
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: linear-gradient(180deg, var(--cream) 0%, var(--sky) 100%);
   color: var(--ink);
   font-family: "Trebuchet MS", "Verdana", "DejaVu Sans", system-ui, sans-serif;
-  font-size: 22px;
-  line-height: 1.45;
+  font-size: clamp(15px, 0.5vw + 11.5px, 18px);
+  line-height: 1.42;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -51,53 +69,47 @@ body {
 .topbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px 12px;
   align-items: center;
   justify-content: space-between;
-  padding: 14px clamp(12px, 3vw, 28px);
-  background: rgba(255, 255, 255, .78);
+  padding: 8px clamp(10px, 2vw, 22px);
+  background: rgba(255, 255, 255, .8);
   backdrop-filter: blur(6px);
-  border-bottom: 4px solid rgba(255, 183, 3, .35);
-  position: sticky;
-  top: 0;
+  border-bottom: 3px solid rgba(255, 183, 3, .35);
   z-index: 10;
 }
 
-.brand { display: flex; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 9px; }
 
 .brand .avatar {
-  font-size: 40px;
+  font-size: clamp(24px, 3.4vh, 32px);
   line-height: 1;
-  filter: drop-shadow(0 3px 0 rgba(35, 50, 74, .15));
+  filter: drop-shadow(0 2px 0 rgba(35, 50, 74, .15));
 }
 
-.brand-text { display: flex; flex-direction: column; }
-.brand-text strong { font-size: 28px; letter-spacing: .5px; }
-.brand-text small { color: var(--ink-soft); font-size: 15px; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.1; }
+.brand-text strong { font-size: clamp(17px, 2.4vh, 21px); letter-spacing: .3px; }
+.brand-text small { color: var(--ink-soft); font-size: clamp(11px, 1.5vh, 13px); }
 
-.badges { display: flex; align-items: center; gap: 8px; }
+.badges { display: flex; align-items: center; gap: 6px; }
 
 .badge {
   background: var(--accent);
   color: #3a2c00;
   border-radius: 999px;
-  padding: 6px 16px;
-  font-size: 18px;
+  padding: 4px 12px;
+  font-size: clamp(13px, 1.8vh, 15px);
   font-weight: 700;
 }
 
-.badge-quiet {
-  background: #eef2f9;
-  color: var(--ink-soft);
-  font-weight: 600;
-}
+.badge-quiet { background: #eef2f9; color: var(--ink-soft); font-weight: 600; }
 
 .icon-btn {
   min-width: var(--tap);
   min-height: var(--tap);
-  font-size: 26px;
-  border-radius: 20px;
-  border: 3px solid rgba(35, 50, 74, .12);
+  font-size: clamp(18px, 2.6vh, 22px);
+  border-radius: 14px;
+  border: 2px solid var(--line);
   background: #fff;
   cursor: pointer;
   transition: transform .08s ease, background .15s ease;
@@ -105,9 +117,12 @@ body {
 
 .icon-btn[aria-pressed="false"] { background: #f1f3f7; opacity: .65; }
 .icon-btn:active { transform: translateY(2px); }
+.icon-btn[aria-expanded="true"] { background: #fff3d1; border-color: var(--accent); }
+
 .icon-btn:focus-visible, .quick:focus-visible, .mood:focus-visible,
-.send:focus-visible, .text-input:focus-visible, .mini:focus-visible {
-  outline: 4px solid #1c6dff;
+.send:focus-visible, .text-input:focus-visible, .mini:focus-visible,
+.seg-btn:focus-visible, .s-btn:focus-visible {
+  outline: 3px solid #1c6dff;
   outline-offset: 2px;
 }
 
@@ -115,95 +130,132 @@ body {
 
 .layout {
   display: grid;
-  gap: 18px;
+  gap: 12px;
   grid-template-columns: minmax(0, 1fr);
-  max-width: 720px;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  width: 100%;
+  max-width: 820px;
   margin: 0 auto;
-  padding: 18px clamp(12px, 3vw, 28px) 8px;
+  padding: 12px clamp(10px, 2vw, 22px) 0;
 }
 
-/* The engine panel is an aside, so the reading column only widens when the
-   panel is actually open. Placing the debug panel in a fixed second column only
-   when it is visible is what keeps the chat card in the wide column: with an
-   always-on second column the chat card is auto-placed into it and the mood card
-   takes the wide column, which reads backwards. */
-@media (min-width: 1100px) {
-  .layout.is-debug {
-    max-width: 1240px;
-    grid-template-columns: minmax(0, 1fr) 380px;
-    align-items: start;
-  }
-
-  .layout.is-debug .debug { grid-column: 2; grid-row: 1 / span 2; }
+/* The panel is an aside: the reading column only widens while it is actually
+   open, so grid auto-placement can never drop the chat card into the narrow
+   column. */
+@media (min-width: 1040px) {
+  .layout.is-open { max-width: 1260px; grid-template-columns: minmax(0, 1fr) 380px; }
+  .layout.is-open .settings { grid-column: 2; grid-row: 1 / span 2; }
 }
 
 /* --------------------------------------------------------------- mood card */
 
 .mood-card, .chat-card {
-  background: rgba(255, 255, 255, .86);
+  background: rgba(255, 255, 255, .88);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: clamp(14px, 2.5vw, 22px);
+  padding: clamp(10px, 1.6vh, 16px) clamp(12px, 1.6vw, 18px);
+  min-width: 0;
+}
+
+.mood-card { display: flex; flex-direction: column; gap: 8px; }
+
+.mood-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .mood-title {
-  margin: 0 0 12px;
-  font-size: 22px;
+  margin: 0;
+  font-size: clamp(14px, 2vh, 17px);
   font-weight: 700;
+}
+
+.mood-toggle {
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: clamp(12px, 1.7vh, 14px);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 2px 4px;
 }
 
 .mood-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .mood {
-  min-height: 88px;
+  min-height: clamp(46px, 7.2vh, 74px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  font-size: 40px;
+  gap: 0;
+  font-size: clamp(21px, 3.4vh, 30px);
   line-height: 1;
-  border: 3px solid rgba(35, 50, 74, .1);
-  border-radius: 22px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
   background: #fffdf7;
   cursor: pointer;
+  overflow: hidden;
   transition: transform .08s ease, border-color .15s ease, background .15s ease;
 }
 
-.mood span { font-size: 15px; color: var(--ink-soft); }
+.mood span {
+  font-size: clamp(9px, 1.35vh, 12px);
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+
 .mood:hover { border-color: var(--accent); background: #fff6dc; }
-.mood:active { transform: translateY(3px); }
+.mood:active { transform: translateY(2px); }
 .mood.chosen { border-color: var(--ok); background: #e9f9ef; }
 
+/* On a short viewport the mood strip is the least important row, so it is the
+   thing that shrinks and then collapses, never the composer. */
+@media (max-height: 700px) {
+  .mood span { display: none; }
+  .mood { min-height: 42px; font-size: 22px; }
+}
+
 /* --------------------------------------------------------------- chat card */
+
+.chat-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;                    /* lets the message list scroll, not grow */
+}
 
 .chat {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  min-height: 320px;
-  max-height: 56vh;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 6px 4px 6px 2px;
+  overscroll-behavior: contain;
+  padding: 4px 6px 4px 2px;
   scroll-behavior: smooth;
 }
 
 .bubble {
-  max-width: 84%;
-  padding: 14px 20px;
-  border-radius: 24px;
-  font-size: 23px;
+  max-width: 86%;
+  padding: clamp(9px, 1.5vh, 14px) clamp(13px, 1.6vw, 18px);
+  border-radius: 18px;
+  font-size: clamp(15px, 2.1vh, 19px);
   word-wrap: break-word;
   overflow-wrap: anywhere;
   animation: pop .16s ease-out;
 }
 
 @keyframes pop {
-  from { transform: scale(.96); opacity: .4; }
+  from { transform: scale(.97); opacity: .5; }
   to   { transform: scale(1); opacity: 1; }
 }
 
@@ -215,42 +267,43 @@ body {
 .bubble.buddy {
   align-self: flex-start;
   background: var(--buddy);
-  border: 3px solid rgba(35, 50, 74, .08);
-  border-bottom-left-radius: 8px;
-  box-shadow: 0 4px 0 rgba(35, 50, 74, .06);
+  border: 2px solid rgba(35, 50, 74, .08);
+  border-bottom-left-radius: 6px;
+  box-shadow: 0 3px 0 rgba(35, 50, 74, .06);
 }
 
 .bubble.child {
   align-self: flex-end;
   background: var(--child);
   color: var(--child-ink);
-  border-bottom-right-radius: 8px;
-  box-shadow: 0 4px 0 rgba(28, 60, 140, .22);
+  border-bottom-right-radius: 6px;
+  box-shadow: 0 3px 0 rgba(28, 60, 140, .22);
 }
 
 .bubble.error {
   align-self: center;
   background: #fff0f0;
-  border: 3px solid rgba(229, 72, 77, .35);
+  border: 2px solid rgba(229, 72, 77, .35);
   color: #8a1f22;
-  font-size: 19px;
+  font-size: clamp(13px, 1.8vh, 16px);
 }
 
 .bubble .tag {
   display: block;
-  margin-top: 8px;
-  font-size: 14px;
+  margin-top: 6px;
+  font-size: clamp(11px, 1.5vh, 13px);
   color: var(--ink-soft);
-  letter-spacing: .3px;
+  letter-spacing: .2px;
 }
 
 .btn-again {
-  margin-top: 10px;
-  min-height: 48px;
-  padding: 0 18px;
-  font-size: 18px;
-  border-radius: 14px;
-  border: 3px solid rgba(229, 72, 77, .4);
+  margin-top: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: clamp(13px, 1.8vh, 16px);
+  border-radius: 12px;
+  border: 2px solid rgba(229, 72, 77, .4);
   background: #fff;
   color: #8a1f22;
   cursor: pointer;
@@ -258,17 +311,18 @@ body {
 
 .typing {
   display: flex;
+  flex: 0 0 auto;      /* only the message list flexes; this must not be squeezed */
   align-items: center;
-  gap: 8px;
-  padding: 8px 6px 2px;
+  gap: 6px;
+  padding: 6px 4px 2px;
   color: var(--ink-soft);
-  font-size: 17px;
+  font-size: clamp(12px, 1.7vh, 15px);
 }
 
-.typing em { font-style: normal; margin-left: 4px; }
+.typing em { font-style: normal; margin-left: 3px; }
 
 .dot {
-  width: 11px; height: 11px; border-radius: 50%;
+  width: 8px; height: 8px; border-radius: 50%;
   background: var(--accent);
   animation: bounce 1s infinite ease-in-out;
 }
@@ -277,47 +331,57 @@ body {
 
 @keyframes bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: .5; }
-  40% { transform: translateY(-7px); opacity: 1; }
+  40% { transform: translateY(-6px); opacity: 1; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dot { animation: none; }
-}
+@media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
 
 /* ------------------------------------------------------------ quick + input */
 
+/* One horizontal strip that scrolls sideways, rather than a grid that wrapped
+   to two rows and pushed the composer off the bottom of short screens. */
 .quick-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
-  margin: 16px 0 12px;
+  display: flex;
+  /* Fixed height, or flex shrinking crushes the chips to slivers: the message
+     list must be the thing that gives way, never the controls. */
+  flex: 0 0 auto;
+  gap: 6px;
+  margin: 8px 0 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
 }
 
 .quick {
-  min-height: var(--tap);
-  font-size: 20px;
-  border-radius: 20px;
-  border: 3px solid rgba(35, 50, 74, .1);
+  flex: 0 0 auto;
+  min-height: clamp(38px, 5.6vh, 46px);
+  padding: 0 clamp(11px, 1.3vw, 15px);
+  font: inherit;
+  font-size: clamp(13px, 1.8vh, 16px);
+  border-radius: 14px;
+  border: 2px solid var(--line);
   background: #fffdf7;
   cursor: pointer;
+  white-space: nowrap;
   transition: transform .08s ease, border-color .15s ease;
 }
 
 .quick:hover { border-color: var(--accent); }
-.quick:active { transform: translateY(3px); }
+.quick:active { transform: translateY(2px); }
 
-.composer { display: flex; gap: 10px; }
+.composer { display: flex; gap: 8px; flex: 0 0 auto; }
 
 .text-input {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: var(--tap);
-  padding: 0 18px;
-  font-size: 22px;
+  min-height: clamp(46px, 6vh, 54px);
+  padding: 0 14px;
+  font-size: clamp(15px, 2.1vh, 18px);
   font-family: inherit;
   color: var(--ink);
-  border: 3px solid rgba(35, 50, 74, .14);
-  border-radius: 20px;
+  border: 2px solid rgba(35, 50, 74, .16);
+  border-radius: 15px;
   background: #fff;
 }
 
@@ -325,85 +389,245 @@ body {
 
 .send {
   flex: 0 0 auto;
-  min-height: var(--tap);
-  padding: 0 24px;
-  font-size: 22px;
+  min-height: clamp(46px, 6vh, 54px);
+  padding: 0 clamp(14px, 1.8vw, 22px);
+  font-size: clamp(15px, 2.1vh, 18px);
   font-family: inherit;
   font-weight: 700;
   color: #06210f;
   background: var(--ok);
   border: none;
-  border-radius: 20px;
+  border-radius: 15px;
   cursor: pointer;
-  box-shadow: 0 5px 0 rgba(6, 33, 15, .28);
+  box-shadow: 0 4px 0 rgba(6, 33, 15, .28);
   transition: transform .08s ease;
 }
 
-.send:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(6, 33, 15, .28); }
+.send:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(6, 33, 15, .28); }
 .send[disabled] { opacity: .55; cursor: progress; }
 
-.tiny-note { font-size: 15px; color: var(--ink-soft); margin: 10px 2px 0; }
+.tiny-note { font-size: clamp(11px, 1.6vh, 13px); color: var(--ink-soft); margin: 6px 2px 0; }
 
-/* ------------------------------------------------------------------ debug */
+/* --------------------------------------------------------------- settings */
 
-.debug {
-  background: #1d2735;
-  color: #d8e2f0;
+/* Previously this was a dark <pre> dumping raw JSON. It is now an ordinary
+   settings panel: labelled sections, formatted values, and the raw payload
+   only behind an explicit disclosure. */
+.settings {
+  background: #fff;
   border-radius: var(--radius);
-  padding: 16px;
-  font-size: 15px;
   box-shadow: var(--shadow);
-  align-self: start;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  /* Must stretch to the grid row, not size to its content: the panel is taller
+     than a 768px laptop, and sizing to content would push the page into
+     scrolling - the exact bug the fixed layout exists to prevent. Stretching
+     bounds it, and `.settings-body` scrolls inside instead. */
+  align-self: stretch;
+  max-height: 100%;
+  border: 1px solid var(--line);
 }
 
-.debug-head {
+@media (max-width: 1039px) {
+  .settings {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(94vw, 430px);
+    border-radius: 0;
+    z-index: 40;
+    overflow-y: auto;
+    box-shadow: -8px 0 24px rgba(35, 50, 74, .18);
+  }
+}
+
+.settings-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 10px;
-  color: #fff;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 2;
 }
 
-.debug-actions { display: flex; gap: 6px; }
+.settings-head strong { font-size: clamp(15px, 2vh, 17px); }
 
-.mini {
-  min-height: 36px;
-  padding: 0 12px;
-  font-size: 14px;
-  font-family: inherit;
-  color: #d8e2f0;
-  background: #2c3a4f;
-  border: 2px solid #3d4f6b;
-  border-radius: 12px;
+.settings-body {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 4px 14px 14px;
+}
+
+.s-group { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.s-group:last-child { border-bottom: none; }
+
+.s-group h3 {
+  margin: 0 0 8px;
+  font-size: clamp(12px, 1.7vh, 14px);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.s-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  background: #eef2f9;
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: clamp(10px, 1.4vh, 12px);
+  font-weight: 600;
+}
+
+.s-note { margin: 8px 0 0; font-size: clamp(11px, 1.6vh, 13px); color: var(--ink-soft); }
+
+/* segmented control */
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+
+.seg-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-height: clamp(46px, 6vh, 56px);
+  padding: 6px 4px;
+  font: inherit;
+  font-size: clamp(14px, 1.9vh, 16px);
+  font-weight: 700;
+  color: var(--ink);
+  background: #f7f9fc;
+  border: 2px solid var(--line);
+  border-radius: 13px;
   cursor: pointer;
 }
 
-.mini:hover { background: #3a4b64; }
+.seg-btn small { font-size: clamp(10px, 1.4vh, 12px); font-weight: 600; color: var(--ink-soft); }
+.seg-btn:hover { border-color: var(--accent); }
+.seg-btn[aria-pressed="true"] {
+  background: #fff3d1;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 
-.debug pre {
-  margin: 0;
-  max-height: 52vh;
+/* Compact variant, used for the level control in the top bar. Declared after
+   `.seg` on purpose: same specificity, so this is what wins for `.seg-sm`. */
+.seg-sm { display: inline-flex; gap: 4px; }
+
+.seg-sm .seg-btn {
+  min-height: 38px;
+  min-width: 44px;
+  padding: 0 8px;
+  font-size: clamp(12px, 1.7vh, 14px);
+  border-radius: 11px;
+}
+
+/* Narrow screens: drop the least important top-bar text rather than shrinking
+   the controls below the accessibility floor. */
+@media (max-width: 640px) {
+  .badge-quiet { display: none; }
+  .brand-text small { display: none; }
+}
+
+/* label/value rows */
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: clamp(12px, 1.7vh, 14px); }
+.kv dt { color: var(--ink-soft); }
+.kv dd { margin: 0; text-align: right; font-weight: 600; overflow-wrap: anywhere; }
+.kv dd.good { color: var(--ok); }
+.kv dd.warn { color: var(--warn); }
+
+.s-btn {
+  width: 100%;
+  min-height: clamp(40px, 5.4vh, 48px);
+  margin-top: 8px;
+  font: inherit;
+  font-size: clamp(13px, 1.8vh, 15px);
+  font-weight: 600;
+  color: var(--ink);
+  background: #f7f9fc;
+  border: 2px solid var(--line);
+  border-radius: 13px;
+  cursor: pointer;
+}
+
+.s-btn:hover { border-color: var(--accent); background: #fff6dc; }
+
+.s-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
+.s-row label { font-size: clamp(12px, 1.7vh, 14px); color: var(--ink-soft); }
+
+.s-select, .s-range { font: inherit; font-size: clamp(12px, 1.7vh, 14px); }
+.s-select {
+  max-width: 60%;
+  min-height: 36px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 6px;
+}
+.s-range { width: 52%; }
+
+.mini {
+  min-height: 34px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: clamp(12px, 1.7vh, 14px);
+  font-weight: 600;
+  color: var(--ink);
+  background: #f7f9fc;
+  border: 2px solid var(--line);
+  border-radius: 11px;
+  cursor: pointer;
+}
+
+.mini:hover { background: #eef2f9; }
+
+details.raw { margin-top: 10px; }
+details.raw summary {
+  cursor: pointer;
+  font-size: clamp(11px, 1.6vh, 13px);
+  color: var(--ink-soft);
+  padding: 4px 0;
+}
+
+.settings pre {
+  margin: 6px 0 0;
+  max-height: 40vh;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: "DejaVu Sans Mono", "Menlo", monospace;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.45;
+  background: #f7f9fc;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
 }
-
-.debug .tiny-note { color: #93a4bd; }
 
 /* ----------------------------------------------------------------- footer */
 
 .footer {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 18px;
+  gap: 4px 16px;
   justify-content: space-between;
-  max-width: 1240px;
+  max-width: 1260px;
   margin: 0 auto;
-  padding: 12px clamp(12px, 3vw, 28px) 26px;
-  font-size: 14px;
+  width: 100%;
+  padding: 6px clamp(10px, 2vw, 22px) 10px;
+  font-size: clamp(10px, 1.4vh, 12px);
   color: var(--ink-soft);
+}
+
+@media (max-height: 620px) {
+  .footer { display: none; }
 }

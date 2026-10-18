@@ -13,7 +13,9 @@ from app.engine import advance, start_session
 from app.llm import (
     ChainProvider,
     GeminiProvider,
+    GroqProvider,
     NullProvider,
+    OpenAICompatibleProvider,
     OpenRouterProvider,
     provider_from_env,
 )
@@ -93,6 +95,10 @@ def openrouter(base_url, **kwargs):
     return OpenRouterProvider(api_key="test-key", model="test-model", base_url=base_url, **kwargs)
 
 
+def groq(base_url, **kwargs):
+    return GroqProvider(api_key="test-key", model="test-model", base_url=base_url, **kwargs)
+
+
 # ------------------------------------------------------------------- parsing
 
 async def test_gemini_success_is_parsed(server):
@@ -108,6 +114,21 @@ async def test_openrouter_success_is_parsed(server):
     assert result.ok is True
     assert result.text == "Yes! cat! You did it!"
     assert result.provider == "openrouter"
+
+
+async def test_groq_success_is_parsed(server):
+    """Groq speaks the OpenAI chat-completions dialect, so it shares the parser."""
+    result = await groq(server()).complete("sys", "user", timeout_ms=2000, max_tokens=32)
+    assert result.ok is True
+    assert result.text == "Yes! cat! You did it!"
+    assert result.provider == "groq"
+
+
+async def test_groq_reports_a_rate_limit_instead_of_raising(server):
+    """Free tiers do get rate limited; that must reach the chain as a failure."""
+    result = await groq(server(mode="http_429")).complete("sys", "user", timeout_ms=2000, max_tokens=32)
+    assert result.ok is False
+    assert result.error == "http_429"
 
 
 async def test_an_empty_model_reply_is_a_failure(server):
@@ -202,6 +223,42 @@ def test_gemini_is_chosen_when_its_key_is_present():
 def test_openrouter_is_chosen_when_it_is_the_only_key():
     provider = provider_from_env({"OPENROUTER_API_KEY": "abc"})
     assert isinstance(provider, OpenRouterProvider)
+
+
+def test_groq_leads_the_preference_order():
+    """Groq is picked ahead of Gemini when both keys exist.
+
+    Its free tier is the quickest of the free options, which is what a two-second
+    turn budget needs; Gemini then becomes the fallback rather than the primary.
+    """
+    provider = provider_from_env({"GROQ_API_KEY": "a", "GEMINI_API_KEY": "b"})
+    assert isinstance(provider, ChainProvider)
+    assert provider.name == "groq+gemini"
+    assert isinstance(provider.providers[0], GroqProvider)
+
+
+def test_groq_is_chosen_when_it_is_the_only_key():
+    provider = provider_from_env({"GROQ_API_KEY": "abc"})
+    assert isinstance(provider, GroqProvider)
+    assert provider.model == "llama-3.3-70b-versatile"
+
+
+def test_groq_and_openrouter_share_one_request_shape():
+    """They differ only in base URL, default model and headers."""
+    assert isinstance(GroqProvider(api_key="k"), OpenAICompatibleProvider)
+    assert isinstance(OpenRouterProvider(api_key="k"), OpenAICompatibleProvider)
+    assert GroqProvider(api_key="k").base_url == "https://api.groq.com/openai/v1"
+    assert OpenRouterProvider(api_key="k").base_url.rstrip("/") == "https://openrouter.ai/api/v1"
+
+
+def test_the_groq_model_can_be_overridden():
+    provider = provider_from_env({"GROQ_API_KEY": "a", "GROQ_MODEL": "openai/gpt-oss-20b"})
+    assert provider.model == "openai/gpt-oss-20b"
+
+
+def test_an_explicit_groq_choice_works_without_a_second_key():
+    provider = provider_from_env({"LLM_PROVIDER": "groq", "GROQ_API_KEY": "a"})
+    assert isinstance(provider, GroqProvider)
 
 
 def test_no_keys_means_a_null_provider():

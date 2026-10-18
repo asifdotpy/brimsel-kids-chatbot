@@ -1,13 +1,13 @@
 %%{init: {"theme": "base", "themeVariables": {"fontFamily": "Helvetica, Arial, sans-serif", "fontSize": "14px"}}} }%%
 flowchart TB
     subgraph BROWSER["Browser - child's device"]
-        UI["index.html + app.js<br/>big buttons, mood faces,<br/>optional speech input, TTS"]
+        UI["index.html + app.js<br/>big buttons, mood faces,<br/>level control, audio player"]
         LS[("localStorage<br/>opaque session blob")]
         UI <--> LS
     end
 
     subgraph SERVER["One deployable service - FastAPI, single process"]
-        API["POST /api/chat<br/>POST /api/session<br/>GET /api/health · /metrics · /curriculum"]
+        API["POST /api/chat<br/>POST /api/level<br/>POST /api/session<br/>POST /api/speech<br/>GET /api/health · /metrics<br/>GET /api/curriculum"]
 
         subgraph SAFETY["1 · Input safety - text.py"]
             S1["normalise · profanity / unsafe-topic block<br/>PII scrub · length limit · worry detection"]
@@ -34,14 +34,24 @@ flowchart TB
         subgraph OUT["6 · Output safety - text.py"]
             O1["block lists · overreach filter<br/>sentence and character budget"]
         end
+
+        subgraph SPEECH["7 · Speech - speech.py (no LLM, after the text renders)"]
+            SP1["mode + correct + energy -&gt; prosody<br/>server assembles the SSML"]
+            SP2["neural voice<br/>+ LRU cache, 512 entries"]
+            SP1 --> SP2
+        end
     end
 
     subgraph LLM["Model - the only non-deterministic part"]
         CH{"ChainProvider<br/>budget shared, one success"}
-        PR1["primary: OpenRouter<br/>google/gemini-3.5-flash-lite"]
-        PR2["backup: Gemini API<br/>gemini-3.5-flash"]
+        PR1["primary: Groq<br/>llama-3.3-70b-versatile"]
+        PR2["backup: OpenRouter / Gemini API<br/>gemini-3.5-flash-lite / gemini-3.5-flash"]
         CH --> PR1
         CH -. "fast failure only,\nbudget remains" .-> PR2
+    end
+
+    subgraph VOICE["Speech synthesiser - edge-tts, no key, no billing"]
+        V1["one request per reply:<br/>a single prosody inside voice"]
     end
 
     UI -->|"message + session blob"| API
@@ -57,14 +67,22 @@ flowchart TB
     O1 -->|"reply + updated session"| API
     API -->|"reply + updated session"| UI
 
+    API -->|"reply text, after it is on screen"| SP1
+    SP2 --> V1
+    V1 -->|"audio/mpeg"| API
+    API -. "audio, or 503 and the browser voice" .-> UI
+
     SAFETY -. "Support mode and unsafe input<br/>never reach the model" .-> F1
+    MODE -. "Support never reaches either" .-> SP1
 
     classDef store fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b
     classDef model fill:#fef3c7,stroke:#d97706,color:#78350f
     classDef deterministic fill:#dcfce7,stroke:#16a34a,color:#052e16
+    classDef voice fill:#fce7f3,stroke:#db2777,color:#831843
     classDef boundary fill:#f8fafc,stroke:#94a3b8,color:#0f172a
 
     class LS store
     class CH,PR1,PR2 model
-    class S1,M1,T1,T2,T3,P1,F1,O1 deterministic
+    class S1,M1,T1,T2,T3,P1,F1,O1,SP1,SP2 deterministic
+    class V1 voice
     class API,UI boundary

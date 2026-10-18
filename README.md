@@ -20,6 +20,7 @@ a child up a level, mark them wrong, or leave them without a reply.
 - [What it does](#what-it-does)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
+- [Voice](#voice)
 - [Tests](#tests)
 - [Measured latency](#measured-latency)
 - [How it works](#how-it-works)
@@ -67,6 +68,31 @@ child learns is a content change, not a code change.
 Non-answers ("um", an emoji, an empty send) never count as an attempt, so
 promotion cannot be farmed by pressing send.
 
+**It speaks with a natural voice, not the browser's robot.**
+
+Replies are synthesised server-side by a neural voice and returned as
+`audio/mpeg`. The markup is assembled in code from the model's intent, never
+written by the model, so no malformed or hostile tag can reach the synthesiser.
+Results are cached in-process: a repeat phrase is served with 0 ms of server
+time. If speech is unavailable the browser voice takes over, so a turn is never
+broken by audio.
+
+**A level control, for reviewing only.**
+
+`L1 / L2 / L3` in the header jumps straight to a level so a reviewer can see
+level-2 and level-3 content without earning promotion first. It is labelled
+"demo control" and does not replace the rule above: left alone, promotion still
+happens on its own. Switching clears that level's attempts and accuracy window
+so it starts clean, and keeps the conversation and per-item mastery.
+
+**It fits a small laptop, and the input box never scrolls away.**
+
+Every size is fluid (`clamp()` and viewport units) rather than a fixed pixel
+value, so the app fits a 1366×768 screen at 100% zoom — no need to zoom out.
+The page itself never scrolls; the message list is the only scrolling area, so
+the composer stays put however long the conversation gets. Nothing shrinks below
+the accessibility floor: 15px body text, 48px tap targets.
+
 ---
 
 ## Quick start
@@ -103,20 +129,39 @@ Everything is environment-based; see [`.env.example`](.env.example).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `openrouter` | `openrouter`, `gemini` or `none` |
+| `LLM_PROVIDER` | auto | `groq`, `openrouter`, `gemini` or `none` |
+| `GROQ_API_KEY` | — | enables the Groq adapter (free tier, fastest free option) |
 | `OPENROUTER_API_KEY` | — | enables the OpenRouter adapter |
 | `GEMINI_API_KEY` | — | enables the Gemini adapter |
-| `OPENROUTER_MODEL` | `google/gemini-3.5-flash-lite` | lead model |
-| `GEMINI_MODEL` | `gemini-3.5-flash` | backup model |
-| `LLM_FALLBACK_PROVIDER` | auto | backup provider; the other key is used if present |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | lead model when Groq is chosen |
+| `OPENROUTER_MODEL` | `google/gemini-3.5-flash-lite` | lead model when OpenRouter is chosen |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Gemini model |
+| `LLM_FALLBACK_PROVIDER` | auto | backup provider; a second key is used if present |
 | `LLM_TIMEOUT_MS` | `1800` | hard per-call ceiling |
 | `LLM_MAX_TOKENS` | `48` | reply length ceiling |
 | `GEMINI_THINKING_BUDGET` | `0` | `0` = answer immediately; `none` for models that reject `0` |
+| `SPEECH_PROVIDER` | `edge` | `edge` for the neural voice, `none` to disable |
+| `SPEECH_VOICE` | `en-US-AvaMultilingualNeural` | any `edge-tts --list-voices` name |
+| `SPEECH_TIMEOUT_MS` | `8000` | give up on audio and let the client fall back |
 | `CURRICULUM_PATH` | `./data/curriculum.json` | point at a different curriculum |
 | `PORT` | `8080` | server port |
 
-If both keys are present the second becomes a **backup inside one shared time
-budget**, so one provider's rate limit does not cost the child a reply.
+Leave `LLM_PROVIDER` unset to pick automatically: the first key present, in the
+order **groq → gemini → openrouter**. Whichever key is present but not chosen
+becomes a **backup inside one shared time budget**, so one provider's rate limit
+does not cost the child a reply.
+
+> **A note on the free providers, because this mattered.** The project started on
+> OpenRouter, whose key reported `is_free_tier: true` with `total_credits: 0` while
+> pointed at a **paid** model — it worked on an undocumented allowance, so it could
+> have failed silently. Direct Gemini free-tier keys answer `429` under rapid turns.
+> Groq is therefore the preferred lead: its free tier has an explicit quota. Add a
+> key from <https://console.groq.com/keys> and set `LLM_PROVIDER=groq`; until then
+> the deployment stays on the measured-good OpenRouter + Gemini pairing.
+
+Speech needs **no key and no billing account**. That is the whole reason it is a
+neural voice rather than Google Cloud Text-to-Speech or Vertex AI: both of those
+require billing to be enabled on the project, and it is not.
 
 > The `GEMINI_THINKING_BUDGET` knob exists for a real reason: `gemini-3.5-flash-lite`
 > answers `400` to `thinkingBudget: 0`, while `gemini-3.5-flash` needs it to stay
@@ -129,16 +174,57 @@ budget**, so one provider's rate limit does not cost the child a reply.
 | `GET /` | the child's UI (static, no build step) |
 | `POST /api/session` | new session + opening line |
 | `POST /api/chat` | one complete turn |
-| `GET /api/health` | liveness, provider, curriculum version (no secrets) |
+| `POST /api/level` | jump to a level and return the first item (demo control) |
+| `POST /api/speech` | reply text → `audio/mpeg` from the neural voice |
+| `GET /api/health` | liveness, provider, curriculum version, voice (no secrets) |
 | `GET /api/metrics` | live p50/p95 from real traffic |
 | `GET /api/curriculum` | curriculum version and level summary |
+
+---
+
+## Voice
+
+**What it is.** Replies are spoken by `edge-tts`'s neural voice
+(`en-US-AvaMultilingualNeural` by default), synthesised by the server and
+returned from `POST /api/speech` as `audio/mpeg`.
+
+**Why not Google Cloud Text-to-Speech.** Vertex AI and Cloud TTS both need a
+**billing account enabled** on the project, and it is not enabled — so that route
+is closed rather than merely harder. `edge-tts` needs no key and no billing, which
+is why it was chosen. The browser's `SpeechSynthesis` remains as the fallback if
+the endpoint is ever unavailable.
+
+**Why the model does not write the SSML.** The model is asked for *intent* —
+"this should be gentle", "the word `cat` matters" — and the server assembles the
+document. The synthesiser accepts exactly one document shape and silently returns
+`NoAudioReceived` for anything else, so a wrong document is *silent* rather than
+loud. `scripts/speech_probe.py --section ssml` is the evidence:
+
+| Document | Result |
+| --- | --- |
+| `<prosody rate='-50%'>` | honoured (1.87 s → 2.90 s) |
+| `<prosody rate='+100%'>` | honoured (1.87 s → 0.77 s) |
+| `<break time='700ms'/>` | **rejected** |
+| `<emphasis level='strong'>` | **rejected** |
+| nested `<prosody>` | **rejected** |
+| a tag bare in `<voice>` | **rejected** |
+
+So only a single `<prosody>` inside `<voice>` is sent, and its rate is derived
+from the mode, whether the answer was right, and the model's energy hint. The
+builder is pinned to `edge_tts.communicate.mkssml`'s own output by a test, so the
+wire format is verified rather than assumed.
+
+**Why the client cannot inject markup.** The browser sends plain text and three
+clamped values (mode, correct, speed). It never sends SSML, because there is no
+parameter for it. Emoji are stripped rather than read aloud, control characters
+are removed, and the text is capped at 400 characters.
 
 ---
 
 ## Tests
 
 ```bash
-python -m pytest        # 225 passed
+python -m pytest        # 287 passed
 ```
 
 Fully offline: an autouse fixture strips every API key and installs a null
@@ -151,9 +237,11 @@ API is slow.
 | `tests/test_modes.py` | all four modes; the full priority order; the 3-learning-turn ceiling; play requests vs learn requests; greeting, boredom and pause signals; unclear → Conversation |
 | `tests/test_safety.py` | input blocking, PII scrubbing, worry detection, tone rules (never "wrong"), output filtering, and **every** fallback context producing a safe, in-budget reply |
 | `tests/test_engine.py` | whole conversations end to end: level changes, streak reset, persistence across a refresh, tamper resistance, one model call per turn |
-| `tests/test_llm.py` | parsing, HTTP 429/500, dead socket, enforced wall-clock timeout, provider chain, thinking-budget payload, provider selection |
+| `tests/test_llm.py` | parsing, HTTP 429/500, dead socket, enforced wall-clock timeout, provider chain, thinking-budget payload, provider selection (Groq leading, OpenRouter and Gemini as fallbacks) |
 | `tests/test_api.py` | routes, status codes, `X-Response-Time-Ms`, empty input, metrics |
-| `tests/test_static.py` | UI contracts: the `[hidden]` guard, panels starting hidden, the engine panel only reserving a column when open, and a scan proving no key, provider or model name reaches the browser |
+| `tests/test_speech.py` | prosody mapping and clamping, emoji stripping, the **SSML wire format checked against `edge-tts`' own builder**, one-request synthesis, the cache, timeout, the 503 fallback contract, and that a client cannot inject markup |
+| `tests/test_level_switch.py` | the demo level control: what a jump clears (level counters) and what it must keep (mastery, conversation), clamping, that it never calls the model, and that ordinary promotion still works afterwards |
+| `tests/test_static.py` | UI contracts: the `[hidden]` guard, panels starting hidden, the settings panel only reserving a column when open, fluid sizing, the message list being the only scroll region, stale audio never playing over a newer reply, and a scan proving no key, provider or model name reaches the browser |
 
 Every requirement called out in the brief maps to a named test; see
 [`docs/system-design.md`](docs/system-design.md#11-testing).
@@ -257,6 +345,70 @@ path. Model benchmark, p50 over 4–5 samples each:
 | `gemini-3.5-flash` (Gemini API) ← backup | 1.83 s |
 | `gemini-3.1-flash-lite` (Gemini API) | 2.76 s |
 
+### 4. Speech — measured on the live revision, not estimated
+
+Speech was added in this revision and measured the same way. It is deliberately
+**off the critical path**: the text renders first and the audio is fetched after,
+so no speech cost appears in the turn numbers above.
+
+Reproduce with `python scripts/speech_probe.py --base <url>`.
+
+| Measurement | Result |
+| --- | --- |
+| Cold synthesis, two-sentence reply | **1984 ms** server |
+| Cold synthesis, short one-sentence reply | **2276 ms** server |
+| Cache hit (`X-Speech-Cached: 1`) | **0 ms** server, ~390 ms client (pure hop) |
+| Timeout ceiling | 8000 ms, then the client falls back to the browser voice |
+
+| Reply style | Audio length (bytes ÷ 6000) |
+| --- | --- |
+| Praise (`Learning`, correct) | 3.74 s |
+| Comfort (`Support`) | 3.91 s |
+| Play (`Engagement`) | 3.74 s |
+
+**Two things were tried and rejected because the measurements said so.**
+
+- **Synthesising each sentence separately** to get a slower final question and a
+  pause between sentences. `scripts/speech_probe.py --section timing` shows the
+  wall-clock grows with sentence count (3 sentences took **1.86×** the time of 2),
+  so the connections are serialised, not concurrent. It bought a mildly different
+  rate per sentence and cost latency in direct proportion to reply length. Removed.
+  The neural voice already pauses at punctuation on its own.
+- **Reading the duration as "the prosody was ignored".** Pitch and volume do not
+  change how long a sentence takes, so they cannot be judged from duration. Only
+  rate is verified that way, and the probe includes a control (3× the text must
+  give ~3× the bytes) so the measurement cannot quietly become meaningless.
+
+**Honest limitation: cold audio starts ~2 seconds after the reply appears.** A
+cache hit is instant, and the cache fills quickly because the vocabulary is small,
+but a *new* phrase costs about two seconds of synthesis before the first sound. Two
+things bound the damage: the text is always on screen first, and a superseded
+speech request is dropped rather than played over a newer reply. Streaming the
+audio to the browser as it is produced (rather than buffering the whole MP3) is the
+obvious next step and was not implemented.
+
+The first version of this voice — the browser's own `SpeechSynthesis` — was the
+"absolutely robotic" audio in the bug report. It is now the fallback, not the
+default.
+
+### 5. Layout — verified by measuring the DOM, not by eye
+
+The two layout bugs in the report were "the UI is too zoomed in on a small laptop"
+and "the input box goes down and I have to scroll to write". Both are checked in
+headless Chromium at 1366×768, 1280×720 and 390×844, with 30 turns injected to
+reproduce a long conversation:
+
+| Check | 1366×768 | 1280×720 | 390×844 |
+| --- | --- | --- | --- |
+| Page scrolls | no | no | no |
+| Composer inside the viewport | yes | yes | yes |
+| Message list is the scroll region | yes | yes | yes |
+| Body font | 18 px | 17.9 px | 15 px |
+| Tap target | 48 px | 48 px | 48 px |
+| Quick-say row height | 45 px | 42 px | 48 px |
+| Settings panel | 380×658 | 380×611 | 367×844 |
+| Console errors | 0 | 0 | 0 |
+
 ---
 
 ## How it works
@@ -329,15 +481,18 @@ app/
   fallbacks.py     every deterministic child-safe reply
   prompts.py       system prompt, directive, user prompt
   llm.py           provider adapters and the latency-bounded chain
+  speech.py        SSML assembly, the neural voice, and the audio cache
   state.py         session shape and tamper-resistant normalisation
   curriculum.py    loads and validates the versioned curriculum
   metrics.py       in-process latency recorder
 data/curriculum.json   versioned curriculum — content, not code
 static/                index.html, styles.css, app.js — no build step
-tests/                 225 offline tests
+tests/                 287 offline tests
 scripts/smoke.py       public-URL smoke test + client-side latency
 scripts/bench_models.py   model latency benchmark
 scripts/progression_check.py  drives a live deployment L1 -> L2 -> L3
+scripts/speech_probe.py       which SSML is honoured; cold vs cached audio
+scripts/layout_check.js       headless-browser layout assertions (needs a server)
 docs/                  design docs, the brief export, architecture diagram,
                        UI screenshot, demo script
 Dockerfile             one image, one process

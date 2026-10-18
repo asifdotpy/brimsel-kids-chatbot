@@ -37,6 +37,7 @@ from .state import (
     append_turn,
     new_state,
     normalize_state,
+    set_level,
     set_mode,
     utcnow,
 )
@@ -353,3 +354,50 @@ def start_session(nickname: str | None = None, session_id: str | None = None) ->
             "llm": {"ok": False, "provider": "none", "model": "", "latency_ms": 0, "error": "not_called"},
         },
     )
+
+
+def change_level(state: dict[str, Any], level: int, curriculum: Curriculum | None = None) -> TurnResult:
+    """Reviewer control: jump to a level and ask that level's first item.
+
+    Deliberately deterministic and offline - no model call. A level jump should
+    be instant and must never depend on an upstream provider, and the opening
+    question of a level is content rather than conversation.
+
+    The request is routed through the ordinary :func:`plan_turn` path, so the
+    first item, ``pending_item``, the learn streak and the mode are all set by
+    exactly the same code that handles a child asking to practise. That matters:
+    a second, hand-rolled "start a lesson" path is precisely how two behaviours
+    drift apart.
+    """
+    curriculum = curriculum or get_curriculum()
+    state = normalize_state(state)
+    # set_level mutates in place and returns None, like set_mode. Assigning its
+    # result would blank the session and silently drop the level.
+    set_level(state, level)
+
+    plan = plan_turn(state, "let's learn", curriculum=curriculum)
+    state = plan.state
+
+    # plan_turn records the child's message, but here the child typed nothing -
+    # a reviewer pressed a button. Drop that synthetic turn rather than putting
+    # words in the child's mouth in their own transcript.
+    if state["turns"] and state["turns"][-1]["role"] == "child":
+        state["turns"].pop()
+        state["turn_count"] = max(0, int(state.get("turn_count", 1)) - 1)
+
+    text = plan.fallback
+    append_turn(
+        state,
+        role="bot",
+        text=text,
+        mode=plan.mode,
+        item_id=plan.item.id if plan.item is not None else None,
+    )
+
+    debug = dict(plan.debug)
+    debug["mode_reason"] = "level_switch"
+    debug["fallback_used"] = True
+    # plan_turn marks a Learning turn as model-eligible; this path deliberately
+    # never calls the model, so the debug block must not claim otherwise.
+    debug["use_llm"] = False
+    return TurnResult(reply=text, state=state, debug=debug)

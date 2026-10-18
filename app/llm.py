@@ -4,6 +4,7 @@ One interface, four implementations, so a provider swap is a config change
 rather than a code change:
 
 * :class:`GeminiProvider` - Google ``generateContent`` (default).
+* :class:`GroqProvider` - Groq's OpenAI-compatible endpoint (free tier).
 * :class:`OpenRouterProvider` - any OpenAI-compatible chat completions endpoint.
 * :class:`ChainProvider` - a primary plus a backup, sharing one time budget.
 * :class:`NullProvider`  - no model configured; the engine always falls back.
@@ -34,6 +35,11 @@ DEFAULT_TEMPERATURE = 0.6
 
 GEMINI_DEFAULT_MODEL = "gemini-3.5-flash"
 OPENROUTER_DEFAULT_MODEL = "google/gemini-3.5-flash-lite"
+GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile"
+
+# Order used when no fallback is named explicitly. Groq first because its free
+# tier is the fastest of the free options, then Gemini, then OpenRouter.
+PROVIDER_PREFERENCE = ("groq", "gemini", "openrouter")
 
 
 @dataclass(frozen=True)
@@ -139,14 +145,23 @@ class GeminiProvider:
         return await _post_json(url, headers, payload, timeout_ms, self.name, self.model, _parse_gemini)
 
 
-class OpenRouterProvider:
-    name = "openrouter"
+class OpenAICompatibleProvider:
+    """Base for any ``/chat/completions`` endpoint (Groq, OpenRouter, ...).
 
-    def __init__(self, api_key: str, model: str = OPENROUTER_DEFAULT_MODEL,
-                 base_url: str | None = None) -> None:
+    They differ only in base URL, default model and any extra headers, so the
+    request shape lives here once.
+    """
+
+    name = "openai-compatible"
+    default_base_url = ""
+    default_model = ""
+
+    def __init__(self, api_key: str, model: str | None = None, base_url: str | None = None,
+                 extra_headers: dict | None = None) -> None:
         self.api_key = api_key
-        self.model = model
-        self.base_url = (base_url or "https://openrouter.ai/api/v1").rstrip("/")
+        self.model = (model or self.default_model).strip() or self.default_model
+        self.base_url = (base_url or self.default_base_url).rstrip("/")
+        self.extra_headers = dict(extra_headers or {})
 
     async def complete(self, system: str, user: str, timeout_ms: int, max_tokens: int) -> LLMResult:
         url = f"{self.base_url}/chat/completions"
@@ -159,8 +174,34 @@ class OpenRouterProvider:
             "max_tokens": max_tokens,
             "temperature": DEFAULT_TEMPERATURE,
         }
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **self.extra_headers,
+        }
         return await _post_json(url, headers, payload, timeout_ms, self.name, self.model, _parse_openai)
+
+
+class OpenRouterProvider(OpenAICompatibleProvider):
+    name = "openrouter"
+    default_base_url = "https://openrouter.ai/api/v1"
+    default_model = OPENROUTER_DEFAULT_MODEL
+
+
+class GroqProvider(OpenAICompatibleProvider):
+    """Groq: OpenAI-compatible with a real free tier.
+
+    Replaces a setup that was quietly fragile. The OpenRouter key that was in use
+    reported ``is_free_tier: true`` with ``total_credits: 0`` while pointed at a
+    *paid* model, so the app depended on an undocumented allowance and degraded
+    silently to canned fallback replies once it ran out - invisible in the UI.
+    Groq's free tier has an explicit quota and is fast on short outputs, which is
+    what a two-second turn budget needs.
+    """
+
+    name = "groq"
+    default_base_url = "https://api.groq.com/openai/v1"
+    default_model = GROQ_DEFAULT_MODEL
 
 
 def _parse_gemini(body: dict) -> str:
@@ -217,21 +258,34 @@ async def _post_json(url: str, headers: dict, payload: dict, timeout_ms: int,
 def provider_from_env(env: dict | None = None) -> Provider:
     """Build a provider chain from configuration.
 
-    ``LLM_PROVIDER`` is ``gemini``, ``openrouter`` or ``none``. With no explicit
-    value we pick whichever key is present, preferring Gemini. If a second key
-    is available it becomes a fallback, so one provider's rate limit or outage
-    does not cost the child a reply.
+    ``LLM_PROVIDER`` is ``groq``, ``gemini``, ``openrouter`` or ``none``. With no
+    explicit value we pick the first provider whose key is present, preferring
+    Groq (fastest free tier), then Gemini, then OpenRouter.
+
+    If a second key is available it becomes a fallback, so one provider's rate
+    limit or outage does not cost the child a reply - which matters more on free
+    tiers than on paid ones.
     """
     env = env if env is not None else os.environ
     choice = (env.get("LLM_PROVIDER") or "").strip().lower()
 
+    groq_key = (env.get("GROQ_API_KEY") or "").strip()
     gemini_key = (env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY") or "").strip()
     openrouter_key = (env.get("OPENROUTER_API_KEY") or "").strip()
 
+    def available(name: str) -> bool:
+        return bool({"groq": groq_key, "gemini": gemini_key, "openrouter": openrouter_key}.get(name))
+
     if choice in ("", "auto"):
-        choice = "gemini" if gemini_key else ("openrouter" if openrouter_key else "none")
+        choice = next((name for name in PROVIDER_PREFERENCE if available(name)), "none")
 
     def build(name: str) -> Provider:
+        if name == "groq" and groq_key:
+            return GroqProvider(
+                api_key=groq_key,
+                model=(env.get("GROQ_MODEL") or "").strip() or None,
+                base_url=env.get("GROQ_BASE_URL"),
+            )
         if name == "gemini" and gemini_key:
             return GeminiProvider(
                 api_key=gemini_key,
@@ -242,7 +296,7 @@ def provider_from_env(env: dict | None = None) -> Provider:
         if name == "openrouter" and openrouter_key:
             return OpenRouterProvider(
                 api_key=openrouter_key,
-                model=(env.get("OPENROUTER_MODEL") or OPENROUTER_DEFAULT_MODEL).strip(),
+                model=(env.get("OPENROUTER_MODEL") or "").strip() or None,
                 base_url=env.get("OPENROUTER_BASE_URL"),
             )
         return NullProvider()
@@ -254,16 +308,14 @@ def provider_from_env(env: dict | None = None) -> Provider:
     chain: list[Provider] = [primary]
 
     explicit_fallback = (env.get("LLM_FALLBACK_PROVIDER") or "").strip().lower()
-    if explicit_fallback and explicit_fallback != choice:
-        secondary = build(explicit_fallback)
+    order = [explicit_fallback] if explicit_fallback else list(PROVIDER_PREFERENCE)
+    for name in order:
+        if not name or name == choice:
+            continue
+        secondary = build(name)
         if not isinstance(secondary, NullProvider):
             chain.append(secondary)
-    else:
-        # Auto: the other provider is used if its key happens to be present.
-        other = "openrouter" if choice == "gemini" else "gemini"
-        secondary = build(other)
-        if not isinstance(secondary, NullProvider):
-            chain.append(secondary)
+            break
 
     return chain[0] if len(chain) == 1 else ChainProvider(chain)
 

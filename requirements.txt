@@ -5,6 +5,12 @@ httpx==0.28.1
 pydantic==2.14.1
 python-dotenv==1.2.4
 
+# Natural speech. Chosen because it needs no API key and no billing account:
+# Google Cloud Text-to-Speech and Vertex AI both require a billing account on the
+# project, which this deployment does not have. `app/speech.py` degrades to the
+# browser voice if this package or its endpoint is ever unavailable.
+edge-tts==7.3.1
+
 # Test-only. Cloud Run installs this file too; the cost is a few MB and it keeps
 # "clone, install, run the tests" to a single command for the reviewers.
 pytest==9.1.1

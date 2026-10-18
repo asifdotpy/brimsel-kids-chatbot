@@ -241,6 +241,28 @@ def set_mode(state: dict[str, Any], mode: str) -> None:
     state["mode"] = mode
 
 
+def set_level(state: dict[str, Any], level: int) -> None:
+    """Move to a level and clear that level's progress so it starts clean.
+
+    This backs the reviewer's level control, not the promotion rule. Per-item
+    mastery is deliberately **kept**: it records which words this particular
+    child finds hard, and that is equally true at any level. Only the level-local
+    counters are cleared - attempts and the accuracy window that drives
+    promotion - so a freshly chosen level does not arrive already part-way to
+    promoting itself.
+    """
+    state["level"] = _int(level, 1, 1, 3)
+    state["attempts_at_level"] = 0
+    state["recent_results"] = []
+    state["correct_streak"] = 0
+    state["miss_streak"] = 0
+    state["learn_streak"] = 0
+    state["ease_count"] = 0
+    state["pending_item"] = None
+    state["current_item"] = None
+    state["item_cursor"] = 0
+
+
 def mastery_of(state: dict[str, Any], item_id: str) -> dict[str, Any]:
     return state["mastery"].setdefault(
         item_id, {"box": 0, "attempts": 0, "correct": 0, "last_seen": None}

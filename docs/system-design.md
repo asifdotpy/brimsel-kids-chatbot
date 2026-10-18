@@ -272,14 +272,21 @@ never as "wrong".
 ### Adapters
 
 `llm.py` defines one `complete(system, user, timeout_ms, max_tokens)` interface
-with four implementations:
+with five implementations:
 
 | Adapter | Notes |
 | --- | --- |
-| `OpenRouterProvider` | OpenAI-compatible; broadest model choice. **Default lead.** |
+| `OpenAICompatibleProvider` | Shared chat-completions implementation, so Groq and OpenRouter differ only in base URL, default model and headers. |
+| `GroqProvider` | Groq's free tier. **Preferred lead**, because its free quota is explicit — unlike the OpenRouter key this project started on, which reported `total_credits: 0` while pointed at a *paid* model. |
+| `OpenRouterProvider` | OpenAI-compatible; broadest model choice. Leads when no Groq key is present. |
 | `GeminiProvider` | Google `generateContent`. Sends `thinkingConfig.thinkingBudget = 0` so hidden reasoning tokens cannot eat a two-sentence reply's output budget. |
 | `ChainProvider` | A lead plus a backup sharing **one** time budget. |
 | `NullProvider` | No key configured. Always fails, so the deterministic reply runs. |
+
+When `LLM_PROVIDER` is unset the lead is chosen automatically in the order
+**groq → gemini → openrouter**, and whichever remaining key exists becomes the
+backup. The deployment sets it explicitly rather than relying on the order, so
+adding a key does not silently reroute the live service.
 
 ### The chain, and why it only retries fast failures
 
@@ -438,6 +445,28 @@ roughly 0.6 s is this service.
 `scripts/smoke.py` reports all three of those numbers separately and on purpose:
 one figure alone would either hide the network or overstate the app.
 
+### Speech and layout, measured on the same revision
+
+Both were added in the bug-fix revision and measured rather than estimated.
+Neither is on the critical path, so neither appears in the turn numbers above.
+
+| Measurement | Result |
+| --- | --- |
+| Cold synthesis, two-sentence reply | 1984 ms server |
+| Cache hit | 0 ms server, ~390 ms client (pure hop) |
+| Timeout ceiling | 8000 ms, then the browser voice takes over |
+| Layout at 1366×768 / 1280×720 / 390×844 | page never scrolls; composer always visible; only the message list scrolls |
+
+A local run against the same code timed out model calls at exactly the 1805 ms
+ceiling, which looked alarming until the same call was made directly: **Gemini
+answered in 1808–2379 ms from that sandbox** while OpenRouter answered in
+1322–1746 ms. The sandbox's network hop is ~1.3 s. On Cloud Run the same chain
+answered in **886 ms**. The lesson is worth recording: a latency problem measured
+through a slow link is a measurement of the link.
+
+The speech timings come from `scripts/speech_probe.py`, which is also the script
+that rejected per-sentence synthesis — see section 11.
+
 ### Model benchmark
 
 `scripts/bench_models.py` times candidates against the real prompt, p50 over 4–5
@@ -465,8 +494,10 @@ this limitation are reported honestly in the [README](../README.md#measured-late
 
 ## 11. Testing
 
-**225 tests**, all offline: an autouse fixture strips every API key and installs
-`NullProvider`, so the suite never touches the network.
+**287 tests**, all offline: an autouse fixture strips every API key and installs
+`NullProvider`, so the suite never touches the network. It also swaps the speech
+service for a disabled one, because `edge-tts` *is* installed in the development
+venv and a speech test would otherwise reach the real synthesiser.
 
 | File | Covers |
 | --- | --- |
@@ -474,24 +505,31 @@ this limitation are reported honestly in the [README](../README.md#measured-late
 | `test_modes.py` | all four modes, the full priority order, the 3-learning-turn ceiling, play-vs-learn requests, greeting and boredom signals, unclear → Conversation |
 | `test_safety.py` | input blocking, PII scrubbing, worry detection, tone rules ("never wrong"), output filtering, every fallback context producing a safe reply |
 | `test_engine.py` | whole conversations: level changes, streak reset, refresh persistence, tamper resistance, one-model-call-per-turn |
-| `test_llm.py` | parsing, HTTP 429/500, dead socket, enforced timeout, chain behaviour, thinking-budget payload, provider selection |
+| `test_llm.py` | parsing, HTTP 429/500, dead socket, enforced timeout, chain behaviour, thinking-budget payload, provider selection (Groq leading; OpenRouter and Gemini as fallbacks) |
 | `test_api.py` | routes, status codes, `X-Response-Time-Ms`, empty input, metrics |
-| `test_static.py` | UI contracts: the `[hidden]` guard, panels starting hidden, the engine panel only reserving a column when open, and a scan proving no key, provider or model name reaches the browser |
+| `test_speech.py` | prosody mapping and clamping, emoji stripping, the SSML wire format checked against `edge_tts.communicate.mkssml`'s own output, one-request synthesis, the in-process cache, timeout, the 503 fallback contract, and that a client cannot inject markup |
+| `test_level_switch.py` | the demo level control: what a jump clears (level counters) and what it keeps (mastery, conversation), clamping, that it never calls the model, and that ordinary promotion still works afterwards |
+| `test_static.py` | UI contracts: the `[hidden]` guard, panels starting hidden, the settings panel only reserving a column when open, fluid sizing, the message list being the only scroll region, stale audio never playing over a newer reply, and a scan proving no key, provider or model name reaches the browser |
 
 The fallback templates are covered by iterating *every* `FallbackContext` and
 asserting the reply is non-empty, child-safe and within budget — so adding a new
 context without a template fails the suite.
 
 ```bash
-python -m pytest        # 225 passed
+python -m pytest        # 287 passed
 ```
 
-### Three bugs that reached a real conversation
+Layout is the one thing a unit test cannot see, so it is checked in a real
+browser by `scripts/layout_check.js` (headless Chromium, three viewports, 30
+injected turns). It is a developer script rather than part of the suite, because
+the suite is deliberately offline and dependency-light.
+
+### Bugs that reached a real conversation
 
 The unit suite is fast, but it cannot see a stylesheet, and it cannot easily
 notice that a *correct* answer never gets scored. Driving the live app in a real
-browser and the live API through a full promotion path found three genuine
-defects that no unit test had:
+browser and the live API through a full promotion path found the defects below
+that no unit test had.
 
 1. **`.typing { display: flex }` silently defeated `hidden`.** A `display`
    declaration beats the user agent's `[hidden] { display: none }`, so
@@ -504,7 +542,7 @@ defects that no unit test had:
    debug panel placed in column 2 *only when visible*. With the panel hidden
    (the default), grid auto-placement put the **chat** card in the 340 px column
    and the mood card in the wide one — exactly backwards, and it swapped when the
-   panel opened. Fixed by gating the second column on `is-debug`, so the aside
+   panel opened. Fixed by gating the second column on `is-open`, so the aside
    only reserves space while it is actually open.
 3. **Two level-3 sentence drills could never be completed.** The curriculum
    sentences *"I went to the park with my mom"* and *"it is raining and I have an
@@ -537,6 +575,74 @@ Both were verified in the browser by reading back the computed geometry
 (chat and mood card 664 px wide in one column; 786 px with the 380 px panel
 beside them) rather than by eyeballing a screenshot.
 
+The bug-fix revision (UI scale, settings panel, natural voice, visible level
+control) added five more, four of which were found by *new* checks rather than by
+the existing suite:
+
+4. **The level jump scored its own question as a miss.** The first version of the
+   switcher called `POST /api/level` and then automatically sent `"let's learn"`
+   so the child saw something happen. But a message sent while a question is
+   pending is *scored as an answer to that question* — so jumping to a level
+   silently marked the first item wrong and moved straight past it. Found by
+   driving `/api/level` then `/api/chat` against the live revision and reading the
+   `item_asked` field: the item the jump asked and the item that got scored were
+   not the same item. The fix is to send nothing at all; the jump already asks a
+   level-appropriate question. Pinned by a test that asserts the switcher body
+   contains no `send(`.
+5. **`set_level` returns `None`.** `change_level` was written as
+   `state = set_level(normalize_state(state), level)` — but `set_level` mutates in
+   place and returns nothing, exactly like `set_mode`. The state became `None`, was
+   re-normalised to a *fresh* level-1 session, and the jump silently did nothing.
+   Caught immediately by the new test `test_a_jump_asks_an_item_from_that_level`,
+   which checks the asked item's level rather than just "the reply is non-empty".
+6. **The speed slider was inverted for slow modes.** `rate` is a signed offset, and
+   the first implementation scaled it: `rate * factor`. The comfort rate is
+   **negative**, so a "faster" setting of 1.3 multiplied −22 by 1.3 and made the
+   voice *slower*. The fix nudges the scale instead of rescaling the offset. The
+   test that caught it compares all three slider positions.
+7. **The settings panel pushed the page into scrolling.** The panel is taller than
+   a 768 px laptop. `align-self: start` made it size to its content rather than the
+   grid row, so it overflowed and grew `documentElement.scrollHeight` — the exact
+   failure the fixed layout exists to prevent, reintroduced by the new panel. The
+   fix is `align-self: stretch` plus `max-height: 100%`, so it is bounded and
+   `.settings-body` scrolls inside. Measured: 977 px tall in a 768 px viewport
+   before, 658 px after.
+8. **The quick-say chips were crushed to slivers.** Flex items shrink by default,
+   so the growing message list squeezed the quick-say row instead of scrolling
+   itself — the buttons were visible only as their top edges. Fixed with
+   `flex: 0 0 auto` on every control row, so the message list is the only thing
+   that gives way. The layout check now asserts the row's height, not just that the
+   composer is on screen, because the original check passed while this bug was
+   present.
+
+The lesson from 7 and 8 is the same: an assertion that "the composer is visible"
+was satisfied while the controls above it were being crushed. The check had to be
+made specific.
+
+### Measured, then rejected: per-sentence synthesis
+
+With `<break>` and `<emphasis>` rejected by the synthesiser (see
+`scripts/speech_probe.py`), the obvious way to get a pause between sentences, or a
+slower final question, is to synthesise each sentence separately and concatenate
+the MP3 frames. That was built, and then removed, because measurement killed it:
+
+| | Server time |
+| --- | --- |
+| 2 segments | 2276 ms |
+| 3 segments | 4236 ms |
+| **ratio** | **1.86×** |
+
+Wall-clock grows with the sentence count, so the connections are serialised rather
+than concurrent. It bought a slightly different rate per sentence and cost latency
+in direct proportion to reply length — while the naturalness the user actually
+complained about comes from the *neural voice*, not from per-sentence prosody, and
+the voice already pauses at punctuation on its own. One request is now sent, always.
+
+This is the same failure mode as the speech-recognition and streaming-token
+decisions in section 12: an attractive feature whose cost only appears when it is
+measured. The probe script exists so the measurement can be repeated rather than
+believed.
+
 ---
 
 ## 12. Trade-offs and what was deliberately left out
@@ -550,6 +656,10 @@ beside them) rather than by eyeballing a screenshot.
 | Streaming tokens | A two-sentence reply is faster delivered whole than streamed, and streaming complicates the safety filter that must see the full text. |
 | Speech recognition | Required to work without a microphone. Browser speech input is offered as a progressive enhancement, never a dependency. |
 | Randomness | Determinism keeps tests, demos and bug reports reproducible. |
+| Model-authored SSML | It would need a second model call (breaking the one-call-per-turn rule), add latency, and hand an injection surface to the model. The model gives *intent*; `app/speech.py` builds the document. |
+| Per-sentence synthesis | **Measured and rejected** — wall-clock grows 1.86× from 2 to 3 sentences, because the connections are serialised. See section 11. |
+| Cloud Text-to-Speech / Vertex AI | Both require a **billing account** on the project, which it does not have. `edge-tts` needs no key, so it is the voice; the browser voice is the fallback. |
+| Streaming audio to the browser | The obvious next step for time-to-first-sound, and genuinely better. Not implemented: the reply text is already on screen first, so the delay is not blocking, and the cache makes repeats instant. |
 
 **Known limitations**
 
@@ -564,3 +674,122 @@ beside them) rather than by eyeballing a screenshot.
 - Provider health is not monitored beyond per-turn failover. A sustained outage
   degrades to deterministic replies — acceptable for this scale, but a real
   deployment would want alerting on the fallback rate.
+- **Cold synthesized audio starts about two seconds after the reply appears.** A
+  cache hit is instant and the cache fills fast, but a *new* phrase pays the
+  synthesis cost. Measured on the live revision: 1984 ms for a two-sentence reply,
+  0 ms on a repeat. The reply text is always on screen first, and a superseded
+  speech request is dropped rather than played over a newer reply.
+- **The lead model is a free tier.** The OpenRouter key this project started on
+  reported `is_free_tier: true` with `total_credits: 0` while pointed at a *paid*
+  model, so it worked on an undocumented allowance and could have failed silently.
+  Groq is preferred for exactly this reason (explicit free quota) and is wired in,
+  but the deployed instance has no Groq key yet, so it runs on the measured-good
+  OpenRouter + Gemini pairing.
+- **The level control is a demo affordance, not part of the pedagogy.** It is
+  labelled as such in the UI. A reviewer can move the child anywhere; the promotion
+  rule is unchanged and still applies if the control is left alone.
+
+---
+
+## 13. Natural speech — added in the bug-fix revision
+
+The report said the audio was *"absolutely robotic"*. It was: the first version
+used the browser's own `SpeechSynthesis`, which on Linux and many Android devices
+is a formant synthesiser. The fix is a real neural voice, `edge-tts`, with the
+browser voice demoted to a fallback.
+
+### Why the server synthesises, and why the model does not write the markup
+
+The client sends **plain text plus three clamped values** (mode, `correct`,
+speed). It never sends SSML, because there is no parameter for it — injection is
+designed out rather than filtered. The server turns the model's *intent* into the
+document and caches the result.
+
+The model is deliberately not asked for SSML. That would need a second model call
+(violating the one-call-per-turn rule), add a second latency hop, and hand an
+injection surface to a component whose output is already treated as untrusted. It
+is asked for *energy* — "gentle", "bright", "slow" — in the same call it is
+already making.
+
+### The document shape is verified, not assumed
+
+The synthesiser accepts exactly one shape and answers `NoAudioReceived` to
+anything else, so a wrong document is **silent rather than loud** — the worst
+possible failure, since nothing would look broken. Two guards:
+
+1. `scripts/speech_probe.py --section ssml` drove eight documents and read the
+   duration back from the byte count. `<break>`, `<emphasis>`, nested `<prosody>`
+   and a bare tag in `<voice>` are all rejected. Only a single `<prosody>` inside
+   `<voice>` works, and only `rate` can be verified that way (pitch and volume do
+   not change how long a sentence takes).
+2. `test_speech.py` asserts our builder's output is **byte-identical** to
+   `edge_tts.communicate.mkssml`'s for the same inputs. If the wire format ever
+   drifts, that test fails instead of the audio going quiet.
+
+That test found a real detail: edge-tts expands `en-US-AvaMultilingualNeural` into
+`Microsoft Server Speech Text to Speech Voice (en-US, AvaMultilingualNeural)`
+before sending. `wire_voice()` mirrors that expansion, so our document is what
+actually goes on the wire.
+
+### Rate is derived, not fixed
+
+`style_for(mode, correct, energy, speed)` maps the turn onto one rate/pitch pair:
+
+| Input | Effect |
+| --- | --- |
+| `Support` | slowest and slightly lower |
+| `Learning`, correct | brighter |
+| `Learning`, incorrect | slower, never sharper — it is a correction, not a rebuke |
+| `Engagement` | a little livelier |
+| energy `calm` / `bright` / `slow` | the model's hint, applied within limits |
+| speed slider | nudges the whole scale by ±15 % |
+
+Everything is clamped (rate ±40 %, pitch ±8 Hz), so a tampered client cannot ask
+for a chipmunk. The speed slider **nudges** rather than **scales** the rate: the
+comfort rate is negative, so scaling would have made "faster" mean slower — which
+it did, until a test caught it (section 11, bug 6).
+
+### The cache is part of the design, not an optimisation
+
+A cold synthesis costs about **two seconds** from a data centre; a hit costs
+**0 ms** of server time. That gap is the difference between a child waiting and a
+child hearing Buddy straight away, so the LRU cache (512 entries, keyed by voice,
+prosody and text) is load-bearing. The vocabulary is small, so it fills quickly.
+
+Speech is also deliberately **off the critical path**: the client renders the text
+first and fetches the audio afterwards, so none of this appears in the turn
+latency numbers in section 10. When speech fails — endpoint down, timeout, autoplay
+blocked — the client falls back to the browser voice rather than failing the turn.
+
+---
+
+## 14. The demo level control
+
+A reviewer needs to see level-2 and level-3 content without spending twenty
+minutes earning promotion. `L1 / L2 / L3` in the header does that, and the same
+control appears in Settings. It is labelled **"demo control"** in both places,
+because it must not be mistaken for the promotion rule in section 5.
+
+`change_level()` is deliberately thin. It routes through the normal `plan_turn()`
+so the plan is built by the same machinery as any other turn, then drops the
+synthetic child turn the planner writes (the child typed nothing — a reviewer
+pressed a button) and returns the deterministic reply, which already asks a
+level-appropriate item. Consequences worth stating:
+
+- **It never calls the model.** The reply is the deterministic fallback, so a jump
+  works with no provider configured and costs ~6 ms. `debug["use_llm"]` is forced
+  to `false` so the debug block does not claim a call that did not happen.
+- **The session still round-trips through `normalize_state()`**, so a tampered blob
+  cannot inject a bad level.
+- **It sends no follow-up message.** The first version did, and the follow-up was
+  scored as an answer to the question the jump had just asked (section 11, bug 4).
+
+Switching levels clears the counters that decide promotion — `attempts_at_level`,
+the 4-of-5 window, the miss and learn streaks, the pending item — so a freshly
+chosen level does not arrive part-way to promoting itself, and the learn-streak
+reset means practice is not blocked on arrival. It **keeps** per-item mastery and
+the whole conversation, because mastery is a record of *this child*, not of the
+level they happen to be on.
+
+After a jump, ordinary promotion works exactly as before; a test drives a correct
+answer at the new level and asserts it scores and counts.

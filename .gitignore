@@ -8,3 +8,5 @@ __pycache__/
 *.egg-info/
 .vercel/
 .DS_Store
+*.swp
+*.swo
