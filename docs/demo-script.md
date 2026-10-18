@@ -43,7 +43,8 @@ mode — above Engagement, Conversation and Learning."
 
 **Point at:** the reply, and that there is **no question and no quiz**.
 
-**Say:** "A sad child is never drilled. And note the latency: 1 millisecond.
+**Say:** "A sad child is never drilled. And note the latency: zero milliseconds of
+model time.
 Support turns never call the model at all — the comfort line is a hand-written
 constant, so it is both faster and safer."
 
@@ -127,8 +128,11 @@ you."
 ## Numbers to have ready
 
 - **225** offline tests.
-- **p50 ≈ 1.0 s, p95 ≈ 1.6 s** end-to-end measured client-side against the live
-  deployment; see the README for sample size and limitations.
-- Hard per-call ceiling: **1800 ms**.
+- **App turn time: p50 589 ms, p95 792 ms, hard-capped at 1804 ms** — 417 live
+  turns as recorded by the engine itself.
+- **End-to-end from a workstation: p50 ≈ 1.08 s, p95 ≈ 1.3–1.6 s**, of which
+  ≈0.45 s is the network hop (measured with bare `GET /api/health` probes).
+- **99.2%** of model calls succeeded (388/391); the fallback spoke on 7% of
+  turns, and 26 of those 29 were Support turns that never call the model.
 - Curriculum: **3 levels, 42 items**, version `2026.10.1`.
-- **Support turns call the model zero times** — ~1 ms.
+- **Support turns call the model zero times** — 0 ms.

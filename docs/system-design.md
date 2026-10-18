@@ -414,22 +414,52 @@ decides whether the model speaks at all:
 2. **A pre-built fallback** — if the model does not answer in time, the turn ends
    at the cap with a real reply, not an error.
 3. **Model selection by measurement** — `scripts/bench_models.py` times
-   candidates against the real prompt. Measured on the deployment VM:
+   candidates against the real prompt.
 
-| Model | p50 | Samples ok |
+### Measured on the live deployment
+
+417 turns of real traffic, as recorded by the engine itself at `GET /api/metrics`:
+
+| Metric | Value |
+| --- | --- |
+| **p50** | **589 ms** |
+| **p95** | **792 ms** |
+| max | 1804 ms — exactly the configured ceiling |
+| Model calls / succeeded | 391 / **388 (99.2%)** |
+| Fallbacks | 29 (7.0%), of which 26 are Support turns that never call the model |
+
+End-to-end from a workstation, over two consecutive 60-turn runs, was p50
+1084 ms and 1082 ms, p95 1615 ms and 1265 ms. The isolated network hop — 20 bare
+`GET /api/health` calls per run — measured p50 442 ms and 461 ms, which is
+consistent with the per-turn `client − server` difference (471 ms and 438 ms).
+So of the ~1.08 s a remote child waits, roughly 0.45 s is the network hop and
+roughly 0.6 s is this service.
+
+`scripts/smoke.py` reports all three of those numbers separately and on purpose:
+one figure alone would either hide the network or overstate the app.
+
+### Model benchmark
+
+`scripts/bench_models.py` times candidates against the real prompt, p50 over 4–5
+samples each:
+
+| Model | p50 | Notes |
 | --- | --- | --- |
-| `google/gemini-3.5-flash-lite` (OpenRouter) | **1.34 s** | 5/5 |
-| `gemini-3.5-flash` (Gemini API) | 1.83 s | 4/5 |
-| `openai/gpt-4o-mini` (OpenRouter) | 1.75 s | 4/4 |
-| `gemini-3.1-flash-lite` (Gemini API) | 2.76 s | 2/5 |
-| `google/gemini-2.5-flash` (OpenRouter) | 0.90 s | 5/5 |
+| `google/gemini-2.5-flash` (OpenRouter) | 0.90 s | |
+| `google/gemini-3.5-flash-lite` (OpenRouter) | 1.34 s | **in production** |
+| `openai/gpt-4o-mini` (OpenRouter) | 1.75 s | |
+| `gemini-3.5-flash` (Gemini API) | 1.83 s | **the backup** |
+| `gemini-3.1-flash-lite` (Gemini API) | 2.76 s | |
 
-Upstream latency was **highly variable** during development — the same call and
-the same model ranged from 0.85 s to 7.3 s depending on the moment. That
-volatility, not the average, is the real design input: no single upstream can be
-trusted to be fast, which is exactly why the fallback is a first-class reply
-rather than an error path. Measured results, sample sizes and this limitation are
-reported honestly in the [README](../README.md#measured-latency).
+Two findings from that table shaped the code. `gemini-3.5-flash-lite` answers
+HTTP 400 to `thinkingConfig.thinkingBudget: 0` while `gemini-3.5-flash` needs it,
+so the budget is configurable (`GEMINI_THINKING_BUDGET`, `none` to omit the
+field). And upstream latency was **highly variable** during development — the
+same call and the same model ranged from **0.85 s to 7.3 s** depending on the
+moment. That volatility, not the average, is the real design input: no single
+upstream can be trusted to be fast, which is exactly why the fallback is a
+first-class reply rather than an error path. Measured results, sample sizes and
+this limitation are reported honestly in the [README](../README.md#measured-latency).
 
 ---
 

@@ -162,51 +162,76 @@ Every requirement called out in the brief maps to a named test; see
 
 ## Measured latency
 
-Measured **end-to-end, client-side**, against the live deployment — including the
-network hop, because that is what a child actually experiences. Reproduce with
-`python scripts/smoke.py <url> --turns 60`.
+Measured against the **live deployment**. Reproduce with:
 
-The engine also records its own view at `GET /api/metrics`, so these numbers come
-from real traffic rather than a synthetic benchmark.
+```bash
+python scripts/smoke.py <url> --turns 60     # drives real turns and times them
+curl <url>/api/metrics                       # the engine's own cumulative record
+```
 
-### End-to-end, client-measured (60 consecutive live turns)
+The smoke script deliberately reports **three** numbers, because one number
+cannot be honest here: the client's view (what the child waits for), the
+server's view (what the app controls), and the difference (the network hop,
+which no app can control).
 
-| Metric | Value |
-| --- | --- |
-| Turns measured | **60** |
-| **p50** | **1058 ms** |
-| **p95** | **1845 ms** |
-| min | 417 ms |
-| max | 3151 ms |
+### 1. The engine's own turn — 417 live turns
 
-### Server-side, recorded by the engine (120 live turns)
+This is the number the implementation is responsible for.
 
 | Metric | Value |
 | --- | --- |
-| Turns | 120 |
-| **p50** | **628 ms** |
-| **p95** | **842 ms** |
-| max | 1803 ms |
-| Model calls | 112 |
-| Model calls that succeeded | **111 (99.1%)** |
-| Turns answered from the deterministic fallback | 9 (7.5%) |
+| Turns | **417** |
+| **p50** | **589 ms** |
+| **p95** | **792 ms** |
+| mean | 587 ms |
+| max | 1804 ms (exactly the configured ceiling) |
+| Model calls | 391 |
+| Model calls that succeeded | **388 (99.2%)** |
+| Turns answered from the deterministic fallback | 29 (7.0%) |
 
-Per mode, server-side p50: Learning 626 ms · Conversation 628 ms · Engagement
-680 ms · **Support 0 ms** (Support never calls the model).
+Per mode, server-side p50 / p95: Learning 591 / 806 ms · Engagement 599 / 746 ms ·
+Conversation 609 / 783 ms · **Support 0 / 0 ms** (Support never calls the model).
+
+### 2. End-to-end, client-measured — two consecutive 60-turn runs
+
+| Metric | Run 1 | Run 2 |
+| --- | --- | --- |
+| Samples | 60 | 60 |
+| **p50** | **1084 ms** | **1082 ms** |
+| **p95** | **1615 ms** | **1265 ms** |
+| min | 419 ms | 410 ms |
+| max | 10513 ms | 1451 ms |
+| Fallback replies | 4 | 4 |
+
+### 3. The network hop, isolated
+
+20 bare `GET /api/health` calls per run — no model, no state, so essentially pure
+network round trip from the measuring workstation to `us-central1`:
+
+| Metric | Run 1 | Run 2 |
+| --- | --- | --- |
+| hop p50 | 442 ms | 461 ms |
+| hop p95 | 514 ms | 582 ms |
 
 **Reading these numbers honestly.**
 
-- The **p95 of 1.845 s is under the two-second budget**; the p50 of ~1.06 s is
-  roughly 400 ms slower than the server's own p50 because the client measurement
-  includes the TLS connection and network hop to `us-central1`.
-- The **3.151 s maximum is network, not the app.** The engine's own maximum for
-  the same period was 1803 ms — exactly the configured ceiling — so the extra
-  ~1.3 s was spent before the request reached the service. It is a single
-  outlier in 60 turns.
-- **8 of the 9 fallbacks were Support turns, which are designed never to call the
-  model.** One was a genuine model timeout. So the model spoke on 99.1% of the
-  turns where it was actually asked to.
-- Longer runs have not been measured; 60 and 120 turns are the sample sizes.
+- **The p50 of ~1.08 s is ~0.49 s of app and ~0.45 s of network.**
+  `client p50 − server p50` measured 471 ms and 438 ms in the two runs, which
+  matches the bare-GET hop of 442 ms and 461 ms. The app's share is the
+  589–628 ms the engine reports for itself.
+- **The engine's p95 is 792 ms, comfortably inside the two-second budget, and its
+  maximum is 1804 ms — exactly the configured `LLM_TIMEOUT_MS` ceiling.** The
+  hard cap is real: it held across all 417 turns.
+- **The 10.5 s client outlier was the network, not the app.** In that same run the
+  engine's own maximum was 1212 ms, and the isolated hop measurements in the same
+  run reached large values too. The measuring sandbox's link to `us-central1` is
+  variable; a single stalled request explains the tail entirely. Run 2, taken
+  minutes later on the same revision, has a 1451 ms maximum.
+- **Only 3 of the 29 fallbacks were model failures.** 26 were Support turns,
+  which by design never call the model. So the model answered on **99.2%** of the
+  turns where it was actually asked to speak.
+- **Sample sizes: 417 server-side turns, 120 client-side turns, 40 hop probes.**
+  No longer run has been measured.
 
 Two mechanisms keep this bounded, and one decides whether the model speaks:
 
