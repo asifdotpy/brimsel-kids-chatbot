@@ -175,6 +175,7 @@ require billing to be enabled on the project, and it is not.
 | `POST /api/session` | new session + opening line |
 | `POST /api/chat` | one complete turn |
 | `POST /api/level` | jump to a level and return the first item (demo control) |
+| `GET /api/warm` | the three level openers, so the client can pre-compose them |
 | `POST /api/speech` | reply text → `audio/mpeg` from the neural voice |
 | `GET /api/health` | liveness, provider, curriculum version, voice (no secrets) |
 | `GET /api/metrics` | live p50/p95 from real traffic |
@@ -218,6 +219,43 @@ wire format is verified rather than assumed.
 clamped values (mode, correct, speed). It never sends SSML, because there is no
 parameter for it. Emoji are stripped rather than read aloud, control characters
 are removed, and the text is capped at 400 characters.
+
+**Why the voice sometimes arrives after the text.** This is the accepted cost of
+moving from the browser's `SpeechSynthesis` to a real neural voice. The browser
+voice is local, so it starts instantly — and sounds robotic, which is what the
+first version did. A server-side voice has to travel to the synthesiser and back:
+measured on the live service, a cold phrase costs **2311–3246 ms** server-side,
+while a cache hit costs **0 ms**.
+
+None of the obvious delivery fixes help, so none were adopted:
+
+| Idea | What the measurement said |
+| --- | --- |
+| Stream the audio instead of sending it whole | the synthesiser emits its first audio chunk only at the end of its own ~3 s; first byte and last byte land within ~200 ms of each other |
+| Pool the connection to the synthesiser | each synthesis opens its own websocket and closes it; repeat calls stayed at 2.1–3.8 s |
+| A websocket to the browser | the browser is not the slow part — the round trip to the synthesiser is |
+| A faster voice | an interleaved benchmark of four `en-US` voices finished within 0.77–0.88 s of each other, i.e. voice choice is noise beside the endpoint's variance |
+
+So the fix is to stop paying twice for sentences the server already knows. Every
+route that returns Buddy's next line **pre-composes that exact sentence in the
+background** (`SpeechService.prewarm`), and the browser's own request for the
+audio *joins* that running synthesis rather than starting a second one. The
+opener of each level is a fixed sentence, so the client asks for all three on
+page load via `GET /api/warm` — that is what makes a level jump sound instant.
+Measured locally: a level jump returns its audio in **19–46 ms** once warm,
+against ~3 s cold.
+
+**A warm-up can never break a turn.** If it is slow it is abandoned after 5 s
+(`PREWARM_TIMEOUT_S`) rather than the full 8 s, and if it fails the child's own
+request simply synthesises from scratch with the time that remains. Speech is an
+enhancement, so it is never the reason a turn fails.
+
+**And one slow phrase can never change the voice.** The client waits for the
+server's own verdict (9000 ms, above the server's 8000 ms ceiling) before falling
+back, a timeout is treated as "too slow" rather than "broken", and the browser
+voice is only latched after `SPEECH_FAIL_LIMIT` consecutive real failures. When
+it is used, the fallback is pinned to a non-male `en-US` voice so the child does
+not hear a different person mid-lesson.
 
 ---
 
@@ -359,8 +397,10 @@ Reproduce with `python scripts/speech_probe.py --base <url>`.
 | Cold synthesis, two-sentence reply | 1984 ms server in one sample; the spread above is more honest |
 | One cold call exceeded the 8 s ceiling | the client fell back to the browser voice, as designed |
 | Cache hit (`X-Speech-Cached: 1`) | **0 ms** server, ~390–500 ms client (pure hop) |
-| Client wait before falling back | **5000 ms**, then the browser voice speaks |
+| Level jump after the client warms the openers | **19–46 ms** wall, `X-Speech-Cached: 1` (measured locally, n=4) |
+| Client wait before falling back | **9000 ms** — deliberately above the server's 8000 ms ceiling, so the server decides |
 | Server ceiling | 8000 ms (`SPEECH_TIMEOUT_MS`) |
+| Speculative warm-up budget | 5000 ms (`PREWARM_TIMEOUT_S`) |
 
 | Reply style | Audio length (bytes ÷ 6000) |
 | --- | --- |
@@ -491,7 +531,7 @@ app/
   metrics.py       in-process latency recorder
 data/curriculum.json   versioned curriculum — content, not code
 static/                index.html, styles.css, app.js — no build step
-tests/                 288 offline tests
+tests/                 306 offline tests
 scripts/smoke.py       public-URL smoke test + client-side latency
 scripts/bench_models.py   model latency benchmark
 scripts/progression_check.py  drives a live deployment L1 -> L2 -> L3

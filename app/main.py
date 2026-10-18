@@ -17,6 +17,7 @@ refresh or a load balancer hop can never lose a lesson.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 
@@ -47,10 +48,47 @@ app = FastAPI(
 _provider = provider_from_env()
 _speech = speech_from_env()
 
+# Detached pre-warms live here so they are not garbage-collected mid-flight.
+_PREWARM_TASKS: set[asyncio.Task] = set()
+
+
+def _prewarm_speech(reply: str, debug: dict | None = None, speed: float = 1.0) -> None:
+    """Compose the audio for a reply the server has just decided on.
+
+    Every route that returns Buddy's next line knows the exact sentence, so the
+    two-to-three seconds of cold synthesis can run while the browser paints the
+    text. The browser's own ``/api/speech`` then joins that running synthesis,
+    and a repeat of the same sentence is a cache hit.
+
+    `speed` must match what the client will send. It is part of the prosody and
+    therefore part of the cache key, so a moved speed slider would otherwise make
+    every warm-up useless.
+
+    This must never delay the text, so it is detached; speech is an enhancement,
+    and a failure here is silent by design.
+    """
+    if not getattr(_speech, "enabled", False):
+        return
+    debug = debug or {}
+    hint = debug.get("hint")
+    energy = hint.get("energy") if isinstance(hint, dict) else None
+    task = asyncio.create_task(
+        _speech.prewarm(
+            reply,
+            mode=debug.get("mode"),
+            correct=debug.get("correct"),
+            energy=energy if isinstance(energy, str) else None,
+            speed=speed,
+        )
+    )
+    _PREWARM_TASKS.add(task)
+    task.add_done_callback(_PREWARM_TASKS.discard)
+
 
 class SessionRequest(BaseModel):
     nickname: str | None = Field(default=None, max_length=40)
     session_id: str | None = Field(default=None, max_length=64)
+    speed: float | None = Field(default=None, ge=0.5, le=1.5)
 
 
 class ChatRequest(BaseModel):
@@ -58,11 +96,13 @@ class ChatRequest(BaseModel):
     message: str = Field(default="", max_length=2000)
     mood: str | None = Field(default=None, max_length=20)
     reply_ms: int | None = Field(default=None, ge=0, le=600_000)
+    speed: float | None = Field(default=None, ge=0.5, le=1.5)
 
 
 class LevelRequest(BaseModel):
     session: dict | None = None
     level: int = Field(default=1, ge=1, le=3)
+    speed: float | None = Field(default=None, ge=0.5, le=1.5)
 
 
 class SpeechRequest(BaseModel):
@@ -133,6 +173,7 @@ async def curriculum_summary() -> dict:
 async def create_session(body: SessionRequest | None = None) -> dict:
     body = body or SessionRequest()
     result = start_session(nickname=body.nickname, session_id=body.session_id)
+    _prewarm_speech(result.reply, result.debug, speed=body.speed or 1.0)
     return {"reply": result.reply, "session": result.state, "debug": result.debug}
 
 
@@ -146,18 +187,50 @@ async def set_level(body: LevelRequest) -> JSONResponse:
     """
     state = normalize_state(body.session) if body.session else new_state()
     result = change_level(state, body.level)
+    # A level jump is the case reviewers notice: the text lands instantly, so the
+    # audio for that same sentence should already be warm when the browser asks.
+    _prewarm_speech(result.reply, result.debug, speed=body.speed or 1.0)
     return JSONResponse(
         {"reply": result.reply, "session": result.state, "debug": result.debug, "server_ms": 0}
     )
+
+
+@app.get("/api/warm")
+async def warm() -> dict:
+    """The openers of the three levels, so the client can pre-compose them.
+
+    Read-only: each jump runs against a throwaway state, so nothing the child has
+    done is touched and no session is returned. Switching level is the one flow a
+    reviewer always tries, each level opens with a fixed sentence, and the first
+    switch is normally the slowest - so composing those three sentences while the
+    page is still settling is what makes the first jump sound instant.
+    """
+    phrases = []
+    for level in (1, 2, 3):
+        try:
+            result = change_level(new_state(), level)
+        except Exception:  # pragma: no cover - defensive: a bad level must not 500
+            continue
+        debug = result.debug or {}
+        phrases.append(
+            {
+                "text": result.reply,
+                "mode": debug.get("mode"),
+                "correct": debug.get("correct"),
+            }
+        )
+    return {"phrases": phrases}
 
 
 @app.post("/api/speech")
 async def speech(body: SpeechRequest) -> Response:
     """Spoken audio for one reply.
 
-    Returns `audio/mpeg` directly so the browser can start playing as soon as the
-    first frames arrive, rather than waiting for a base64 blob inside JSON. On
-    any failure it answers 503 and the client uses the browser voice instead -
+    Returns `audio/mpeg` directly rather than base64 inside JSON, so a large
+    payload is never inflated by a third. The body is sent as one piece: the
+    synthesiser produces its first audio chunk only at the very end of its own
+    ~3s, so progressive delivery would not start playback meaningfully sooner.
+    On any failure it answers 503 and the client uses the browser voice instead -
     speech is an enhancement, so it must never break a turn.
     """
     started = time.perf_counter()
@@ -216,6 +289,7 @@ async def chat(body: ChatRequest) -> JSONResponse:
 
     server_ms = int((time.perf_counter() - started) * 1000)
     llm = result.debug.get("llm") or {}
+    _prewarm_speech(result.reply, result.debug, speed=body.speed or 1.0)
     recorder.record(
         total_ms=server_ms,
         mode=result.debug.get("mode", "unknown"),

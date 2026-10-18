@@ -20,13 +20,16 @@
   const VOICE_KEY = "buddy.voice.v1";
   const SPEED_KEY = "buddy.speed.v1";
   const REQUEST_TIMEOUT_MS = 20000;
-  // How long to wait for the neural voice before giving up on it. Measured cold
-  // synthesis has a p50 of ~3.3s and a tail past 8s. The child prefers the good
-  // voice (the whole reason it was added), so waiting is right - but not for 12s
-  // in silence. 5s covers the measured p50 by a wide margin and then falls back
-  // to the browser voice, which is instant. A phrase does not stay uncached:
-  // repeats are served in 0 ms, so the second time the child hears the good one.
-  const SPEECH_TIMEOUT_MS = 5000;
+  // How long to wait for the neural voice. This is deliberately longer than the
+  // server's own synthesis budget (8s), so the client waits for the server's
+  // verdict instead of aborting early and discarding a synthesis that was about
+  // to succeed. Timing out is now rare and harmless: it costs one silent turn,
+  // not the rest of the session. Cold synthesis is ~2.3-3.3s server-side, so the
+  // common case still plays well before this bound.
+  const SPEECH_TIMEOUT_MS = 9000;
+  // A transient failure must not latch the poorer browser voice for the whole
+  // session - that is what made the voice seem to "change" mid-conversation.
+  const SPEECH_FAIL_LIMIT = 3;
 
   const el = {
     chat: document.getElementById("chat"),
@@ -73,6 +76,7 @@
   let busy = false;
   let soundOn = localStorage.getItem(SOUND_KEY) !== "off";
   let serverVoice = true;     // false once we learn the server cannot speak
+  let serverVoiceFails = 0;   // consecutive failures; latches only after SPEECH_FAIL_LIMIT
   let health = null;
   let lastDebug = null;
   let lastServerMs = 0;
@@ -87,6 +91,11 @@
   // ------------------------------------------------------------------ helpers
 
   const nowMs = () => Date.now();
+
+  // The server pre-composes audio using this exact value, so it has to travel on
+  // every request that can produce a spoken line: speed shapes the prosody, and
+  // so it is part of the server's cache key.
+  const currentSpeed = () => Number(localStorage.getItem(SPEED_KEY) || "1");
 
   function saveSession() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(session)); }
@@ -216,22 +225,35 @@
 
   // ------------------------------------------------------------------ speech
 
+  // The server voice is a female en-US neural voice. When the browser voice has
+  // to stand in for it, it should sound like the same person: dropping to an
+  // arbitrary platform default is what made the voice seem to change gender on
+  // its own. A chosen voice from Settings always wins.
+  const MALE_BROWSER_VOICE = /\b(male|david|mark|guy|george|ryan|alex|daniel|fred|tom|oliver)\b/i;
+  const NICE_BROWSER_VOICE = [
+    /natural/i, /neural/i, /premium/i, /enhanced/i,
+    /aria/i, /jenny/i, /ava/i, /samantha/i, /libby/i,
+    /sonia/i, /michelle/i, /zira/i, /google us english/i,
+  ];
+
   function pickBrowserVoice() {
     if (!("speechSynthesis" in window)) return null;
     browserVoices = window.speechSynthesis.getVoices() || [];
     if (!browserVoices.length) return null;
 
-    const prefer = [
-      /natural/i, /neural/i, /premium/i, /enhanced/i,
-      /google us english/i, /microsoft (aria|jenny|guy|libby|sonia)/i,
-      /samantha/i, /ava/i, /allison/i, /serena/i,
-    ];
+    const chosenName = localStorage.getItem(VOICE_KEY) || "";
+    if (chosenName) {
+      const explicit = browserVoices.find((v) => v.name === chosenName);
+      if (explicit) return explicit;
+    }
+
     const english = browserVoices.filter((v) => /^en(-|_)?/i.test(v.lang));
-    for (const pattern of prefer) {
-      const hit = english.find((v) => pattern.test(v.name));
+    const female = english.filter((v) => !MALE_BROWSER_VOICE.test(v.name));
+    for (const pattern of NICE_BROWSER_VOICE) {
+      const hit = female.find((v) => pattern.test(v.name));
       if (hit) return hit;
     }
-    return english[0] || browserVoices[0] || null;
+    return female[0] || english[0] || browserVoices[0] || null;
   }
 
   function browserSpeak(text) {
@@ -244,7 +266,7 @@
       const chosen = pickBrowserVoice();
       if (chosen) utterance.voice = chosen;
       utterance.lang = (chosen && chosen.lang) || "en-US";
-      utterance.rate = Number(localStorage.getItem(SPEED_KEY) || "1") * 0.95;
+      utterance.rate = currentSpeed() * 0.95;
       utterance.pitch = 1.05;
       utterance.volume = 1;
       window.speechSynthesis.speak(utterance);
@@ -252,9 +274,11 @@
   }
 
   /* Ask the server for natural audio. The server rebuilds the SSML itself from
-     the text plus a few enums, so nothing here can inject markup. */
+     the text plus a few enums, so nothing here can inject markup.
+     Returns "ok" | "timeout" | "error" so the caller can tell a slow synthesis
+     apart from a broken one. */
   async function playServerVoice(text, hint, generation) {
-    if (!soundOn || !serverVoice) return false;
+    if (!soundOn || !serverVoice) return "error";
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SPEECH_TIMEOUT_MS);
     try {
@@ -267,7 +291,7 @@
           correct: lastDebug ? lastDebug.correct : null,
           target: (lastDebug && lastDebug.item_ask) || "",
           hint: hint || null,
-          speed: Number(localStorage.getItem(SPEED_KEY) || "1"),
+          speed: currentSpeed(),
         }),
         signal: controller.signal,
       });
@@ -275,7 +299,7 @@
       const blob = await response.blob();
       if (!blob.size) throw new Error("empty audio");
       // A newer turn has already spoken; this audio is stale.
-      if (generation !== speechGeneration) return true;
+      if (generation !== speechGeneration) return "ok";
 
       audio.pause();
       if (audio.src) URL.revokeObjectURL(audio.src);
@@ -286,11 +310,13 @@
       } catch (err) {
         // Autoplay blocked before the first interaction: silent is fine, the
         // child has not touched the page yet.
-        return true;
+        return "ok";
       }
-      return true;
+      return "ok";
     } catch (err) {
-      return false;
+      // An abort means "too slow", not "broken": the server keeps composing and
+      // caches the result, so the next request for that phrase is instant.
+      return err && err.name === "AbortError" ? "timeout" : "error";
     } finally {
       clearTimeout(timer);
     }
@@ -298,16 +324,35 @@
 
   async function speak(text, hint) {
     if (!soundOn || !text) return;
+    if (!serverVoice) {
+      // Already established that the server cannot speak at all.
+      browserSpeak(text);
+      return;
+    }
+
     const generation = ++speechGeneration;
-    const spoke = await playServerVoice(text, hint, generation);
+    const outcome = await playServerVoice(text, hint, generation);
     if (generation !== speechGeneration) return;
-    if (!spoke) {
-      // The server voice is unavailable (offline deploy, endpoint change, or a
-      // blocked autoplay). The browser voice is poorer, but silent is worse.
+
+    if (outcome === "ok") {
+      serverVoiceFails = 0;
+      return;
+    }
+    if (outcome === "timeout") {
+      // One slow phrase is not a broken voice. Stay quiet for this turn and let
+      // the next one try the server again, rather than swapping the child's
+      // voice mid-lesson. The synthesis still completes and is cached.
+      return;
+    }
+
+    // A real failure. The browser voice is poorer and is a different person, so
+    // it is only a stopgap: three failures in a row means the endpoint is down.
+    serverVoiceFails += 1;
+    if (serverVoiceFails >= SPEECH_FAIL_LIMIT) {
       serverVoice = false;
       refreshSpeechRow();
-      browserSpeak(text);
     }
+    browserSpeak(text);
   }
 
   function stopSpeaking() {
@@ -344,6 +389,7 @@
         message: text,
         mood: mood || null,
         reply_ms: replyMs,
+        speed: currentSpeed(),
       });
 
       session = data.session;
@@ -378,7 +424,7 @@
     lastBotAt = 0;
     lastDebug = null;
     try {
-      const data = await postJSON("/api/session", {});
+      const data = await postJSON("/api/session", { speed: currentSpeed() });
       session = data.session;
       saveSession();
       addBubble("buddy", data.reply);
@@ -402,7 +448,7 @@
     stopSpeaking();
     setTyping(true);
     try {
-      const data = await postJSON("/api/level", { session, level: Number(level) });
+      const data = await postJSON("/api/level", { session, level: Number(level), speed: currentSpeed() });
       session = data.session;
       saveSession();
       addBubble("buddy", data.reply);
@@ -469,6 +515,33 @@
       el.kvConn.className = "warn";
       el.buildInfo.textContent = "";
     }
+  }
+
+  /* Compose the three level openers now, while the page is settling.
+     Switching level is the one flow a reviewer always tries, and the first switch
+     is normally the slowest: the sentence is new to the synthesiser, so the text
+     appears seconds before the voice. Every level opens with a fixed sentence, so
+     requesting that audio up front - as real requests, which is what keeps the
+     server's CPU allocated - makes the first jump sound instant. Best effort
+     throughout: a failure just leaves the cache cold, exactly as before. */
+  async function warmVoice() {
+    if (!soundOn || !serverVoice) return;
+    try {
+      const { phrases } = await getJSON("/api/warm");
+      for (const phrase of phrases || []) {
+        fetch("/api/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: phrase.text,
+            mode: phrase.mode || null,
+            correct: phrase.correct === undefined ? null : phrase.correct,
+            hint: null,
+            speed: currentSpeed(),
+          }),
+        }).catch(() => { /* a cold cache is the old behaviour, not a failure */ });
+      }
+    } catch (err) { /* warming is an optimisation, never a dependency */ }
   }
 
   function diagnosticsText() {
@@ -642,6 +715,7 @@
   loadHealth().then(() => {
     renderSessionRows();
     resume();
+    warmVoice();
   });
   el.text.focus();
 })();

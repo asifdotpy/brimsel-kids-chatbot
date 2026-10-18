@@ -101,11 +101,14 @@ never be drilled."
 there is a level control right here — labelled **demo control**, because it is not
 the rule."
 
-**Point at:** the reply, which already asks a level-3 sentence.
+**Point at:** the reply, which already asks a level-3 sentence — **and that the voice
+starts with it**, not three seconds later.
 
 **Say:** "Switching clears that level's attempt counters so it starts clean, but it
-keeps the conversation and everything Buddy has learned about this child. And it
-never calls the model — six milliseconds."
+keeps the conversation and everything Buddy has learned about this child. It never
+calls the model — six milliseconds. And the audio is already composed: the server
+builds each level's opening line in the background, so the voice arrives with the
+text instead of after it."
 
 ---
 
@@ -138,21 +141,25 @@ still gets a safe reply. One container, one process, no database. Thank you."
 | A reply sounds like a template | "That is the deterministic fallback — the model was too slow, so the pre-built safe reply ran instead. The child still gets an answer, and the turn stays inside the two-second budget." |
 | A provider error | "The provider chain moved to the backup; if both fail, the fallback speaks. Nothing a child sees depends on an API being healthy." |
 | Slow first response | Point at the metrics endpoint and note it is the first request after a cold start; the service runs with `min-instances=1` to avoid this. |
-| The audio is late | "Speech is off the critical path — the text renders first and the audio is fetched after, so text latency is unaffected. A phrase Buddy has said before is served from cache in zero milliseconds." |
+| The audio is late | "Speech is off the critical path — the text renders first and the audio is fetched after, so text latency is unaffected. A phrase Buddy has said before is served from cache in zero milliseconds, and every line is pre-composed as soon as the server knows it — which is why a level jump speaks immediately." |
+| Why is a *new* sentence slower? | "The neural voice is a round trip to the synthesiser: about three seconds cold, zero from cache. Streaming, connection pooling and a browser websocket were each measured and each changed nothing, so the fix is to never synthesise the same sentence twice." |
+| The voice changes to a different person | "That is the browser fallback, used only if the neural voice is genuinely unreachable — it is pinned to a non-male voice so it does not change gender. A single slow phrase no longer switches it." |
 | No sound at all | "The neural voice is unreachable, so the browser voice has taken over. Audio is an enhancement, never a dependency." |
 
 ## Numbers to have ready
 
-- **288** offline tests.
+- **306** offline tests.
 - **App turn time: p50 589 ms, p95 792 ms, hard-capped at 1804 ms** — 417 live
   turns as recorded by the engine itself.
 - **End-to-end from a workstation: p50 ≈ 1.08 s, p95 ≈ 1.3–1.6 s**, of which
   ≈0.45 s is the network hop (measured with bare `GET /api/health` probes).
 - **99.2%** of model calls succeeded (388/391); the fallback spoke on 7% of
   turns, and 26 of those 29 were Support turns that never call the model.
-- **Speech:** cold synthesis p50 **3.3 s** (n=6, max 4.9 s), **0 ms** on a cache hit.
-  The client waits 5 s, then the browser voice speaks. Measured
-  with `scripts/speech_probe.py`.
+- **Speech:** cold synthesis p50 **3.3 s** server-side (n=6, max 4.9 s), **0 ms** on a
+  cache hit. The client waits 9 s — above the server's own 8 s ceiling, so the
+  server decides — and only then uses the browser voice. A warm level jump returns
+  its audio in **19–46 ms**. Measured with `scripts/speech_probe.py` and against the
+  live revision.
 - **Layout:** the page never scrolls at 1366×768, 1280×720 or 390×844; the composer
   is always inside the viewport. Measured with `scripts/layout_check.js`.
 - **Level jump: ~6 ms**, no model call.

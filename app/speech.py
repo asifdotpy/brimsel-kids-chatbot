@@ -54,6 +54,9 @@ DEFAULT_VOICE = "en-US-AvaMultilingualNeural"
 MAX_SPEECH_CHARS = 400
 CACHE_SIZE = 512
 SYNTH_TIMEOUT_S = 8.0
+# A speculative warm-up gets less than a real request. If it cannot finish inside
+# this window it is abandoned, leaving room for the child's own attempt to run.
+PREWARM_TIMEOUT_S = 5.0
 
 # Rate is clamped well inside the range the voice handles gracefully. A child is
 # listening to this, so extremes are unhelpful even where they work.
@@ -237,6 +240,7 @@ class SpeechService:
         self.cache_size = cache_size
         self.timeout_s = float(timeout_s)
         self._cache: "OrderedDict[tuple[str, str, str], bytes]" = OrderedDict()
+        self._inflight: dict[tuple[str, str, str], "asyncio.Task[bytes]"] = {}
         self.provider = "edge" if self.enabled else "none"
 
     # ------------------------------------------------------------------ cache
@@ -254,7 +258,7 @@ class SpeechService:
             self._cache.popitem(last=False)
 
     def cache_info(self) -> dict[str, int]:
-        return {"entries": len(self._cache), "size": self.cache_size}
+        return {"entries": len(self._cache), "size": self.cache_size, "inflight": len(self._inflight)}
 
     def clear_cache(self) -> None:
         self._cache.clear()
@@ -280,6 +284,103 @@ class SpeechService:
             raise SpeechUnavailable("the voice returned no audio")
         return bytes(buffer)
 
+    # ------------------------------------------------------- pre-warm & coalesce
+
+    def _key(self, cleaned: str, style: SpeechStyle) -> tuple[str, str, str]:
+        return (self.voice, f"{style.rate}|{style.pitch}|{style.volume}", cleaned)
+
+    def _spawn(
+        self,
+        key: tuple[str, str, str],
+        cleaned: str,
+        style: SpeechStyle,
+        budget: float,
+    ) -> tuple["asyncio.Task[bytes]", bool]:
+        """Start, or join, the synthesis for one cache key.
+
+        Returns ``(task, ours)``. Pre-warming is why this exists: the route that
+        produced a reply starts composing its audio while the browser is still
+        painting the text, so the browser's own request usually lands on a
+        synthesis that is already running. Awaiting that shared task - instead of
+        starting a second - avoids paying the same ~3 seconds twice.
+
+        ``budget`` bounds the whole synthesis, retry included. A speculative
+        warm-up asks for less than a real request so that, if it is abandoned,
+        the child's own attempt still has time to run.
+        """
+        task = self._inflight.get(key)
+        if task is not None:
+            return task, False
+
+        async def run() -> bytes:
+            data = await self._synthesise_bounded(cleaned, style, budget)
+            self._cache_put(key, data)
+            return data
+
+        task = asyncio.ensure_future(run())
+        self._inflight[key] = task
+
+        def _finished(done: "asyncio.Task[bytes]", cache_key: tuple[str, str, str] = key) -> None:
+            self._inflight.pop(cache_key, None)
+            if not done.cancelled():
+                # Mark a failure as retrieved. Awaiters still see it; a detached
+                # pre-warm must not log "exception was never retrieved".
+                done.exception()
+
+        task.add_done_callback(_finished)
+        return task, True
+
+    async def _synthesise_bounded(self, cleaned: str, style: SpeechStyle, budget: float) -> bytes:
+        """One synthesis, retried once if the upstream refuses outright.
+
+        This endpoint answers ``NoAudioReceived`` intermittently, so a single
+        retry inside the same budget turns a flaky miss into a spoken reply. A
+        genuine outage still gives up rather than hanging, because the whole
+        attempt - retry included - is bounded by ``budget``.
+        """
+
+        async def attempt() -> bytes:
+            try:
+                return await self._synthesise(cleaned, style)
+            except SpeechUnavailable:
+                return await self._synthesise(cleaned, style)
+
+        return await asyncio.wait_for(attempt(), timeout=budget)
+
+    async def prewarm(
+        self,
+        text: str,
+        mode: str | None = None,
+        correct: bool | None = None,
+        energy: str | None = None,
+        speed: float = 1.0,
+    ) -> bool:
+        """Compose `text` before anyone asks for it. Best effort; never raises.
+
+        A route already knows the exact sentence it just sent, so it can pay the
+        synthesis cost while the browser renders that sentence: on Cloud Run a
+        cold phrase costs roughly two to three seconds server-side, and a cache
+        hit costs nothing. Anything already cached is left alone, and a failure
+        is silent because speech is an enhancement, never a requirement.
+        """
+        if not self.enabled:
+            return False
+        cleaned = clean_for_speech(text)
+        if not cleaned:
+            return False
+
+        style = style_for(mode, correct, energy, speed)
+        key = self._key(cleaned, style)
+        if self._cache_get(key) is not None:
+            return True
+
+        task, _ = self._spawn(key, cleaned, style, min(self.timeout_s, PREWARM_TIMEOUT_S))
+        try:
+            await asyncio.shield(task)
+        except Exception:
+            return False
+        return True
+
     async def audio(
         self,
         text: str,
@@ -299,7 +400,7 @@ class SpeechService:
             raise SpeechUnavailable("nothing to say")
 
         style = style_for(mode, correct, energy, speed)
-        key = (self.voice, f"{style.rate}|{style.pitch}|{style.volume}", cleaned)
+        key = self._key(cleaned, style)
 
         started = asyncio.get_event_loop().time()
         cached = self._cache_get(key)
@@ -313,10 +414,24 @@ class SpeechService:
                 ms=0,
             )
 
+        task, ours = self._spawn(key, cleaned, style, budget)
         try:
-            data = await asyncio.wait_for(self._synthesise(cleaned, style), timeout=budget)
-        except asyncio.TimeoutError as exc:
-            raise SpeechUnavailable("speech timed out") from exc
+            data = await asyncio.wait_for(asyncio.shield(task), timeout=budget)
+        except (asyncio.TimeoutError, SpeechUnavailable) as exc:
+            if ours:
+                if isinstance(exc, asyncio.TimeoutError):
+                    raise SpeechUnavailable("speech timed out") from exc
+                raise
+            # We joined a speculative warm-up and it did not deliver. A warm-up is
+            # allowed to fail; the child's request is not. Synthesise for real
+            # with whatever is left of this request's own budget.
+            remaining = budget - (asyncio.get_event_loop().time() - started)
+            if remaining <= 0.5:
+                raise SpeechUnavailable("speech timed out") from exc
+            try:
+                data = await self._synthesise_bounded(cleaned, style, remaining)
+            except asyncio.TimeoutError as late:
+                raise SpeechUnavailable("speech timed out") from late
 
         self._cache_put(key, data)
         elapsed = int((asyncio.get_event_loop().time() - started) * 1000)

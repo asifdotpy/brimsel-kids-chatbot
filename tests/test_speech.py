@@ -10,6 +10,7 @@ the wire.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -373,7 +374,290 @@ def test_a_model_hint_is_clamped_and_never_trusted(client, monkeypatch):
     assert seen["energy"] is None
 
 
+def test_a_transient_synthesis_failure_is_retried_once(monkeypatch):
+    """A pre-warm must not hand its one-off failure to the child's request.
+
+    This endpoint answers `NoAudioReceived` intermittently, so a single retry
+    inside the same time budget turns a flaky miss into a spoken reply.
+    """
+    service = SpeechService(enabled=True)
+    calls = {"n": 0}
+
+    async def flaky(text, style):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise SpeechUnavailable("NoAudioReceived")
+        return b"\xff\xf3recovered"
+
+    monkeypatch.setattr(service, "_synthesise", flaky)
+    heard = asyncio.run(service.audio("Can you say cat?"))
+    assert calls["n"] == 2
+    assert heard.data == b"\xff\xf3recovered"
+
+
+def test_a_persistent_synthesis_failure_still_surfaces(monkeypatch):
+    """The retry must not turn a real outage into an indefinite wait."""
+    service = SpeechService(enabled=True)
+    calls = {"n": 0}
+
+    async def broken(text, style):
+        calls["n"] += 1
+        raise SpeechUnavailable("the voice returned no audio")
+
+    monkeypatch.setattr(service, "_synthesise", broken)
+    with pytest.raises(SpeechUnavailable):
+        asyncio.run(service.audio("Can you say cat?"))
+    assert calls["n"] == 2, "exactly one retry, then it gives up"
+
+
 def test_health_advertises_the_voice(client):
     body = client.get("/api/health").json()
     assert "speech" in body
     assert set(body["speech"]) >= {"enabled", "provider", "voice", "cache"}
+
+
+# -------------------------------------------------------------------- pre-warm
+
+def test_prewarming_fills_the_cache_before_anyone_asks(monkeypatch):
+    """A route knows the sentence it just sent, so the ~3s can run while the UI paints."""
+    service = SpeechService(enabled=True)
+    calls = {"n": 0}
+
+    async def fake(text, style):
+        calls["n"] += 1
+        return b"\xff\xf3warm" * 4
+
+    monkeypatch.setattr(service, "_synthesise", fake)
+
+    warmed = asyncio.run(service.prewarm("Great job! Can you say cat?", mode="Learning", correct=True))
+    assert warmed is True
+
+    heard = asyncio.run(service.audio("Great job! Can you say cat?", mode="Learning", correct=True))
+    assert calls["n"] == 1, "the later request must reuse the pre-warmed audio"
+    assert heard.cached is True and heard.ms == 0
+
+
+def test_prewarming_a_cached_phrase_costs_nothing(monkeypatch):
+    service = SpeechService(enabled=True)
+    calls = {"n": 0}
+
+    async def fake(text, style):
+        calls["n"] += 1
+        return b"x"
+
+    monkeypatch.setattr(service, "_synthesise", fake)
+    asyncio.run(service.audio("Hello there!"))
+    assert asyncio.run(service.prewarm("Hello there!")) is True
+    assert calls["n"] == 1, "a phrase already in the cache must not be synthesised again"
+
+
+def test_concurrent_requests_for_one_phrase_share_a_single_synthesis(monkeypatch):
+    """Pre-warming and the browser's own request overlap by design.
+
+    Two syntheses for one phrase would double the load and could deliver audio
+    out of order; the second caller has to join the first.
+    """
+    service = SpeechService(enabled=True)
+    calls = {"n": 0}
+
+    async def slow(text, style):
+        calls["n"] += 1
+        await asyncio.sleep(0.05)
+        return b"\xff\xf3shared" * 4
+
+    monkeypatch.setattr(service, "_synthesise", slow)
+
+    async def main():
+        return await asyncio.gather(
+            service.prewarm("Can you say cat?", mode="Learning", correct=True),
+            service.audio("Can you say cat?", mode="Learning", correct=True),
+        )
+
+    warm, ask = asyncio.run(main())
+    assert warm is True
+    assert calls["n"] == 1, "one phrase must cost exactly one synthesis"
+    # The joining caller reports cached=False (it did find a miss) but received the
+    # shared audio, and the result still landed in the cache for the next turn.
+    assert ask.data == b"\xff\xf3shared" * 4
+    assert not service.cache_info()["inflight"], "an in-flight entry must be released"
+
+    again = asyncio.run(service.audio("Can you say cat?", mode="Learning", correct=True))
+    assert again.cached is True and calls["n"] == 1
+
+
+def test_prewarming_is_a_no_op_when_speech_is_off(monkeypatch):
+    service = SpeechService(enabled=False)
+
+    async def boom(text, style):  # pragma: no cover - must never run
+        raise AssertionError("disabled speech must not synthesise")
+
+    monkeypatch.setattr(service, "_synthesise", boom)
+    assert asyncio.run(service.prewarm("anything")) is False
+
+
+def test_a_failed_prewarm_is_silent(monkeypatch):
+    """Speech is an enhancement, so a warm-up failure must never surface."""
+    service = SpeechService(enabled=True)
+
+    async def broken(text, style):
+        raise SpeechUnavailable("upstream refused")
+
+    monkeypatch.setattr(service, "_synthesise", broken)
+    assert asyncio.run(service.prewarm("anything at all")) is False
+
+
+def test_the_server_warms_the_voice_for_a_level_jump(client, monkeypatch):
+    """The reviewer case: the text lands instantly, so the audio should too.
+
+    The pre-warm must use exactly the fields the browser will send, or the two
+    requests produce different cache keys and nothing is shared.
+    """
+    import app.main as main_module
+
+    warmed: list[tuple[str, dict]] = []
+
+    class SpySpeech:
+        enabled = True
+        voice = "v"
+
+        async def prewarm(self, text, **kwargs):
+            warmed.append((text, kwargs))
+            return True
+
+        async def audio(self, **kwargs):  # pragma: no cover - no audio is requested
+            raise AssertionError("this test requests no audio")
+
+    monkeypatch.setattr(main_module, "_speech", SpySpeech())
+    body = client.post("/api/level", json={"session": None, "level": 2}).json()
+
+    deadline = time.time() + 2.0
+    while not warmed and time.time() < deadline:
+        time.sleep(0.01)
+
+    assert warmed, "a level jump must warm the voice for the reply it just produced"
+    text, kwargs = warmed[0]
+    assert text == body["reply"]
+    assert kwargs["mode"] == body["debug"]["mode"]
+    assert kwargs["correct"] == body["debug"]["correct"]
+
+
+def test_the_server_warms_the_voice_for_a_new_session(client, monkeypatch):
+    import app.main as main_module
+
+    warmed: list[str] = []
+
+    class SpySpeech:
+        enabled = True
+        voice = "v"
+
+        async def prewarm(self, text, **kwargs):
+            warmed.append(text)
+            return True
+
+        async def audio(self, **kwargs):  # pragma: no cover
+            raise AssertionError("this test requests no audio")
+
+    monkeypatch.setattr(main_module, "_speech", SpySpeech())
+    body = client.post("/api/session", json={}).json()
+
+    deadline = time.time() + 2.0
+    while not warmed and time.time() < deadline:
+        time.sleep(0.01)
+
+    assert warmed == [body["reply"]]
+
+
+def test_prewarming_never_delays_the_reply(client, monkeypatch):
+    """The warm-up is detached: a slow synthesis must not hold up the text."""
+    import app.main as main_module
+
+    class SlowPrewarmSpeech:
+        enabled = True
+        voice = "v"
+
+        async def prewarm(self, text, **kwargs):
+            await asyncio.sleep(5.0)  # would blow any request budget
+            return True
+
+        async def audio(self, **kwargs):  # pragma: no cover
+            raise AssertionError("no audio is requested")
+
+    monkeypatch.setattr(main_module, "_speech", SlowPrewarmSpeech())
+    started = time.perf_counter()
+    response = client.post("/api/level", json={"session": None, "level": 1})
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 200
+    assert elapsed < 1.0, "the reply must not wait for the voice"
+
+
+def test_a_failed_warm_up_never_fails_the_childs_request(monkeypatch):
+    """A speculative warm-up is allowed to fail; the real request is not."""
+    service = SpeechService(enabled=True)
+    calls = {"n": 0}
+
+    async def flaky(text, style):
+        calls["n"] += 1
+        if calls["n"] <= 2:  # both attempts of the warm-up fail
+            await asyncio.sleep(0.05)  # still running when the child asks
+            raise SpeechUnavailable("NoAudioReceived")
+        return b"\xff\xf3served-anyway"
+
+    monkeypatch.setattr(service, "_synthesise", flaky)
+
+    async def main():
+        warm = asyncio.create_task(service.prewarm("Can you say cat?"))
+        await asyncio.sleep(0.01)  # let the warm-up claim the in-flight slot
+        try:
+            return await service.audio("Can you say cat?")
+        finally:
+            await warm
+
+    heard = asyncio.run(main())
+    assert heard.data == b"\xff\xf3served-anyway"
+    assert calls["n"] == 3, "two failed warm-up attempts, then one real synthesis"
+
+
+def test_the_warm_up_uses_the_speed_the_client_will_ask_with(client, monkeypatch):
+    """Speed shapes the prosody, so it is part of the cache key.
+
+    A moved speed slider would otherwise make every warm-up useless and silently
+    restore the delay.
+    """
+    import app.main as main_module
+
+    seen: list[dict] = []
+
+    class SpySpeech:
+        enabled = True
+        voice = "v"
+
+        async def prewarm(self, text, **kwargs):
+            seen.append(kwargs)
+            return True
+
+        async def audio(self, **kwargs):  # pragma: no cover - no audio requested
+            raise AssertionError("this test requests no audio")
+
+    monkeypatch.setattr(main_module, "_speech", SpySpeech())
+    client.post("/api/level", json={"session": None, "level": 1, "speed": 0.8})
+
+    deadline = time.time() + 2.0
+    while not seen and time.time() < deadline:
+        time.sleep(0.01)
+
+    assert seen, "the reply must still be warmed"
+    assert seen[0]["speed"] == 0.8
+
+
+def test_the_warm_endpoint_lists_the_three_level_openers(client):
+    """Read-only: it must neither return nor touch a session."""
+    body = client.get("/api/warm").json()
+    phrases = body["phrases"]
+
+    assert len(phrases) == 3, "one opener per level"
+    assert all(p["text"] for p in phrases)
+    assert all(p["mode"] == "Learning" for p in phrases)
+    assert all(p["correct"] is None for p in phrases)
+    assert len({p["text"] for p in phrases}) == 3, "each level opens differently"
+    assert "session" not in body, "a warm-up must not hand back session state"

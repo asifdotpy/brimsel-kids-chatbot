@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from app.speech import SYNTH_TIMEOUT_S
+
 STATIC = Path(__file__).resolve().parent.parent / "static"
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 CSS = (STATIC / "styles.css").read_text(encoding="utf-8")
@@ -160,18 +162,80 @@ def test_a_superseded_speech_request_never_plays_over_a_newer_reply():
     )
 
 
-def test_the_client_does_not_wait_indefinitely_for_audio():
-    """Cold synthesis measured ~3.3s p50, with a tail past 8s.
+def test_the_client_waits_for_the_server_verdict_before_falling_back():
+    """Cold synthesis measured 2.3-3.3s server-side, with a tail past its 8s budget.
 
-    The child prefers the neural voice, so waiting is right - but the client must
-    not sit in silence. The wait is bounded, then the browser voice takes over.
+    The client bound must sit *above* the server's own synthesis budget so that a
+    slow phrase is decided by the server, not aborted client-side - an early abort
+    throws away a synthesis that was about to succeed.
     """
     match = re.search(r"SPEECH_TIMEOUT_MS\s*=\s*(\d+)", JS)
     assert match, "app.js must bound how long it waits for server audio"
     timeout_ms = int(match.group(1))
-    assert 2000 <= timeout_ms <= 6000, (
-        f"the audio wait is {timeout_ms}ms; too short wastes the good voice, too "
-        "long leaves the child in silence"
+    assert timeout_ms > SYNTH_TIMEOUT_S * 1000, (
+        f"the client wait ({timeout_ms}ms) must exceed the server budget "
+        f"({SYNTH_TIMEOUT_S * 1000}ms) so the server decides"
+    )
+    assert timeout_ms <= 15000, "but still be bounded, so silence is never indefinite"
+
+
+def test_one_slow_phrase_does_not_latch_the_browser_voice():
+    """A single timeout used to set serverVoice = false for the whole session.
+
+    That silently swapped the child's voice for the browser default mid-lesson,
+    which is what made the voice appear to change on its own.
+    """
+    assert re.search(r"SPEECH_FAIL_LIMIT\s*=\s*[2-9]", JS), (
+        "a transient failure must not latch the fallback voice"
+    )
+    match = re.search(r"async function speak\(text, hint\).*?\n  \}", JS, re.S)
+    assert match, "speak() must exist"
+    body = match.group(0)
+    assert '"timeout"' in body, "a slow synthesis must be handled separately from a failure"
+    assert re.search(r"serverVoiceFails\s*\+=\s*1", body), "failures must be counted"
+    assert re.search(
+        r"if \(serverVoiceFails >= SPEECH_FAIL_LIMIT\)\s*\{\s*serverVoice = false", body
+    ), "the browser voice is only latched after repeated failures"
+
+
+def test_a_slow_phrase_is_quiet_rather_than_swapping_the_voice():
+    """Silence for one turn beats a different person mid-sentence."""
+    match = re.search(r"if \(outcome === \"timeout\"\)\s*\{(.*?)\n    \}", JS, re.S)
+    assert match, "speak() must branch on a timeout"
+    assert "browserSpeak" not in match.group(1), (
+        "a timeout must not fall through to the browser voice"
+    )
+
+
+def test_the_fallback_voice_matches_the_gender_of_the_server_voice():
+    """The server voice is female; an arbitrary platform default is often male."""
+    assert "MALE_BROWSER_VOICE" in JS, "male voices must be excluded from the fallback"
+    assert re.search(r"MALE_BROWSER_VOICE\s*=\s*/.*male.*/i", JS), "male voices are named"
+    assert not re.search(r"/microsoft \(aria\|jenny\|guy", JS), (
+        "the old preference list contained a male voice"
+    )
+    assert re.search(r"english\.filter\(\(v\) => !MALE_BROWSER_VOICE\.test\(v\.name\)\)", JS), (
+        "the preference list must be drawn from the non-male voices"
+    )
+
+
+def test_the_client_warms_the_level_openers_on_load():
+    """Switching level is the flow a reviewer always tries, and the first switch
+    is the slowest. The openers are fixed sentences, so they can be composed up
+    front instead of after the text has already appeared."""
+    assert '"/api/warm"' in JS, "the client must ask for the openers"
+    assert "function warmVoice" in JS
+    assert re.search(r"loadHealth\(\)\.then\(\(\) => \{[^}]*warmVoice\(\)", JS, re.S), (
+        "warming must happen after the page has connected"
+    )
+
+
+def test_the_client_tells_the_server_the_prosody_speed():
+    """Speed is part of the server's cache key, so the pre-composed audio must be
+    built with the same value the child's request will use."""
+    assert re.search(r"currentSpeed\s*=\s*\(\)\s*=>", JS)
+    assert len(re.findall(r"speed:\s*currentSpeed\(\)", JS)) >= 3, (
+        "chat, session and level all need it"
     )
 
 

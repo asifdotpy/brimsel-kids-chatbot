@@ -84,7 +84,7 @@ brimsel-kids-chatbot/
 │   └── metrics.py       in-process latency recorder
 ├── data/curriculum.json the versioned curriculum (content, not code)
 ├── static/              index.html, styles.css, app.js — no build step
-├── tests/               225 tests
+├── tests/               306 tests
 ├── scripts/smoke.py     public-URL smoke test + client-side latency
 ├── scripts/bench_models.py  model latency benchmark
 ├── scripts/progression_check.py  drives a live deployment L1 -> L2 -> L3
@@ -454,8 +454,10 @@ Neither is on the critical path, so neither appears in the turn numbers above.
 | --- | --- |
 | Cold synthesis, short reply (**n=6**) | **p50 3311 ms** (min 2606, max 4910) server |
 | Cache hit | **0 ms** server, ~390–500 ms client (pure hop) |
-| Client wait, then browser voice | 5000 ms |
+| Client wait, then browser voice | 9000 ms — deliberately above the server's 8000 ms ceiling so the server decides |
 | Server ceiling | 8000 ms (`SPEECH_TIMEOUT_MS`) |
+| Speculative warm-up ceiling | 5000 ms (`PREWARM_TIMEOUT_S`) |
+| Level jump after the client warms the openers | **19–46 ms** wall, `X-Speech-Cached: 1` (local, n=4); live server time **0 ms** |
 | Layout at 1366×768 / 1280×720 / 390×844 | page never scrolls; composer always visible; only the message list scrolls |
 
 A local run against the same code timed out model calls at exactly the 1805 ms
@@ -495,7 +497,7 @@ this limitation are reported honestly in the [README](../README.md#measured-late
 
 ## 11. Testing
 
-**288 tests**, all offline: an autouse fixture strips every API key and installs
+**306 tests**, all offline: an autouse fixture strips every API key and installs
 `NullProvider`, so the suite never touches the network. It also swaps the speech
 service for a disabled one, because `edge-tts` *is* installed in the development
 venv and a speech test would otherwise reach the real synthesiser.
@@ -508,16 +510,16 @@ venv and a speech test would otherwise reach the real synthesiser.
 | `test_engine.py` | whole conversations: level changes, streak reset, refresh persistence, tamper resistance, one-model-call-per-turn |
 | `test_llm.py` | parsing, HTTP 429/500, dead socket, enforced timeout, chain behaviour, thinking-budget payload, provider selection (Groq leading; OpenRouter and Gemini as fallbacks) |
 | `test_api.py` | routes, status codes, `X-Response-Time-Ms`, empty input, metrics |
-| `test_speech.py` | prosody mapping and clamping, emoji stripping, the SSML wire format checked against `edge_tts.communicate.mkssml`'s own output, one-request synthesis, the in-process cache, timeout, the 503 fallback contract, and that a client cannot inject markup |
+| `test_speech.py` | prosody mapping and clamping, emoji stripping, the SSML wire format checked against `edge_tts.communicate.mkssml`'s own output, one-request synthesis, the in-process cache, timeout, the 503 fallback contract, pre-warming with in-flight coalescing, that a warm-up failure never fails the real request, the retry for a transient upstream failure, and that a client cannot inject markup |
 | `test_level_switch.py` | the demo level control: what a jump clears (level counters) and what it keeps (mastery, conversation), clamping, that it never calls the model, and that ordinary promotion still works afterwards |
-| `test_static.py` | UI contracts: the `[hidden]` guard, panels starting hidden, the settings panel only reserving a column when open, fluid sizing, the message list being the only scroll region, stale audio never playing over a newer reply, and a scan proving no key, provider or model name reaches the browser |
+| `test_static.py` | UI contracts: the `[hidden]` guard, panels starting hidden, the settings panel only reserving a column when open, fluid sizing, the message list being the only scroll region, stale audio never playing over a newer reply, the client outlasting the server's own audio ceiling, a timeout not latching the fallback voice, that fallback being non-male, the level openers being warmed on load, and a scan proving no key, provider or model name reaches the browser |
 
 The fallback templates are covered by iterating *every* `FallbackContext` and
 asserting the reply is non-empty, child-safe and within budget — so adding a new
 context without a template fails the suite.
 
 ```bash
-python -m pytest        # 287 passed
+python -m pytest        # 306 passed
 ```
 
 Layout is the one thing a unit test cannot see, so it is checked in a real
@@ -620,6 +622,29 @@ The lesson from 7 and 8 is the same: an assertion that "the composer is visible"
 was satisfied while the controls above it were being crushed. The check had to be
 made specific.
 
+The follow-up revision (the late-voice investigation) added two more, both found by
+driving the live service rather than by the suite:
+
+9. **One slow phrase silently changed the child's voice — including its gender.**
+   The client latched `serverVoice = false` on *any* failure, and a mere timeout
+   counted as a failure. The 5 s client ceiling therefore fired on any cold phrase
+   slower than 5 s, and from then on every reply used the platform's default
+   `SpeechSynthesis` voice — often male — instead of the synthesiser chosen for
+   being natural. That is the reported *"the voice changed male and female
+   automatically"*. Two fixes: the client now outlasts the server's own ceiling
+   (9000 ms against 8000 ms) and treats a timeout as "too slow" rather than
+   "broken"; and the fallback voice is pinned to a non-male `en-US` voice rather
+   than whatever the platform offers first.
+10. **Warming the cache could hand the child a `503`.** The first pre-warm
+    implementation had the browser's audio request *join* the warm-up's in-flight
+    task — the right shape — but a warm-up that ran out of budget then failed the
+    child's request along with it. Observed live as a `503` with
+    `detail: "speech timed out"` for the very sentence that had been warmed. A
+    warm-up now gets a shorter budget than a real request (5 s against 8 s), a
+    failure is retried once, and a failed warm-up falls through to a real synthesis
+    with the time that remains.
+    `test_a_failed_warm_up_never_fails_the_childs_request` pins it.
+
 ### Measured, then rejected: per-sentence synthesis
 
 With `<break>` and `<emphasis>` rejected by the synthesiser (see
@@ -675,13 +700,17 @@ believed.
 - Provider health is not monitored beyond per-turn failover. A sustained outage
   degrades to deterministic replies — acceptable for this scale, but a real
   deployment would want alerting on the fallback rate.
-- **Cold synthesized audio starts about three seconds after the reply appears.**
-  A cache hit is instant and the cache fills fast, but a *new* phrase pays the
-  synthesis cost. Measured on the live revision over six short phrases: p50
-  3311 ms, max 4910 ms, and one earlier sample exceeded the 8 s ceiling and fell
-  back. The client waits 5 s and then uses the browser voice. The reply text is
-  always on screen first, and a superseded speech request is dropped rather than
-  played over a newer reply.
+- **Cold audio for a *new* sentence still starts about three seconds after the
+  reply appears.** This is inherent to the free synthesiser: measured live, a cold
+  phrase costs 2311–3246 ms server-side while a cache hit costs 0 ms. The
+  mitigation is to stop paying for sentences the server already knows — every route
+  pre-composes the line it just decided on, and the client pre-composes the three
+  level openers on load, so **a level jump returns its audio in 19–46 ms**. A
+  *conversational* reply is novel every turn, so it still pays the cold cost. The
+  real fix for that is a deterministic spoken line rather than a faster pipe:
+  streaming, connection pooling and a browser websocket were each measured and each
+  changed nothing (section 13). The reply text is always on screen first, and a
+  superseded speech request is dropped rather than played over a newer reply.
 - **The lead model is a free tier.** The OpenRouter key this project started on
   reported `is_free_tier: true` with `total_credits: 0` while pointed at a *paid*
   model, so it worked on an undocumented allowance and could have failed silently.
@@ -700,6 +729,66 @@ The report said the audio was *"absolutely robotic"*. It was: the first version
 used the browser's own `SpeechSynthesis`, which on Linux and many Android devices
 is a formant synthesiser. The fix is a real neural voice, `edge-tts`, with the
 browser voice demoted to a fallback.
+
+### Why the voice arrives after the text, and what actually fixes it
+
+The next report was that *"the text comes but the voice comes after a few
+seconds"*. Nothing had regressed in code: the first version used the browser's
+local `SpeechSynthesis`, which starts instantly and sounds robotic, so removing the
+robotic voice necessarily removed the instant start. Live measurements:
+
+| Measurement | Result |
+| --- | --- |
+| Cold phrase, server-side | **2311–3246 ms** (n=3, same day; n=6 earlier: p50 3311 ms, max 4910 ms) |
+| Repeat of a known phrase, server-side | **0 ms** — the cache was never the problem |
+
+Four plausible fixes were measured and rejected:
+
+| Idea | Measurement |
+| --- | --- |
+| **Stream** the audio | first byte 3607 ms vs last byte 3826 ms within one request — the synthesiser emits its first audio chunk only at the end of its own work, so progressive delivery saves ~200 ms |
+| **Pool** the connection | edge-tts builds a fresh `ClientSession` + websocket per call. Passing a shared `TCPConnector` fails after one call, because aiohttp sets `_connector_owner = True` and the session closes the connector. A connector subclass that refuses to close does keep the pool alive — and repeat calls still took 2.1–3.8 s, because websocket connections are not returned to the pool |
+| **A browser websocket** | the browser is not the bottleneck; the round trip to the synthesiser is |
+| **A different voice** | interleaved round-robin over four `en-US` voices: first-audio p50 **0.77–0.88 s** for all four. Voice choice is noise beside the endpoint's variance |
+
+Uncontrolled sequencing was actively misleading: benchmarking voices one after
+another put the current voice at 2.0 s and every later voice at ~0.9 s, which read
+as a voice problem. Interleaving the same calls removed the effect entirely. The
+sandbox's hop to the synthesiser makes absolute numbers untrustworthy, so decisions
+used within-request comparisons (first byte vs last byte) and the server's own
+`X-Speech-Ms` header.
+
+What works is not moving bytes faster, but **never synthesising the same sentence
+twice**:
+
+- `SpeechService.prewarm()` composes a sentence in the background. Every route that
+  returns Buddy's next line calls it with that exact line *and the prosody speed*,
+  because speed is part of the cache key.
+- The browser's own `/api/speech` **joins** the running synthesis rather than
+  starting a second one — one in-flight task per cache key.
+- The three level openers are fixed sentences, so the client fetches them on load
+  (`GET /api/warm`) and posts them to `/api/speech`. They have to be *real
+  requests*: Cloud Run throttles CPU between requests, so a purely detached warm-up
+  cannot be relied on to make progress.
+
+Two failure modes had to be designed out, both observed while testing:
+
+1. **A warm-up failure must never become the child's failure.** It did at first: a
+   warm-up that hit the 8 s ceiling handed its `503` straight to the client. A
+   warm-up now gets a shorter budget (`PREWARM_TIMEOUT_S = 5 s`), and when a joined
+   warm-up fails, `audio()` synthesises for real with the time that remains.
+2. **A transient upstream failure must not poison the cache slot.** `edge-tts`
+   answers `NoAudioReceived` intermittently, so one synthesis is retried once
+   inside the same budget.
+
+Finally, the voice can no longer appear to change on its own. It did because the
+client latched `serverVoice = false` on *any* failure — including a mere timeout —
+and fell through to the platform's default voice, which is often male. The client
+now waits for the server's verdict (9000 ms, above the server's 8000 ms ceiling),
+treats a timeout as "too slow" rather than "broken", stays silent for that one
+turn, and latches the browser voice only after three consecutive real failures.
+When the fallback *is* used it is pinned to a non-male `en-US` voice, so the child
+never hears a different person mid-lesson.
 
 ### Why the server synthesises, and why the model does not write the markup
 
