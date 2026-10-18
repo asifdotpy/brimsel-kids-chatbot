@@ -1,167 +1,158 @@
-# Two-minute demo script
+# Buddy — a two-minute demo
 
 **Live app:** https://brimsel-kids-chatbot-153163979718.us-central1.run.app
 
-Total run time: **2:00**. Every line is spoken in English. The app is driven live;
-nothing here is pre-recorded or mocked.
+**Running time:** 2:00.
 
-> Before you start: open the URL in a **fresh private window** so the session
-> starts at level 1, set the window to about **1366×768**, and leave it at **100%
-> zoom** — the layout is built to fit that without zooming out. Turn the sound on.
-> Have the Notion architecture page open in another tab for the close.
+**How to read this.** Lines in **bold** are spoken aloud, word for word. Lines
+marked *Do* are what you do to the app. Everything else is a note for you and is
+not said out loud.
 
----
+> **Before you go on stage.** Open the link in a fresh private window, so the
+> lesson starts from the beginning. Size the window to roughly **1366×768** and
+> leave it at **100% zoom** — the layout is built for that, no zooming out. Turn
+> the sound up. Keep the architecture page open in another tab for the last ten
+> seconds.
 
-## 0:00 – 0:15 · The setup (15s)
-
-**Say:** "This is Buddy, an English tutor for children under seven. The whole
-design rests on one rule: **code decides, the model only speaks.**"
-
-**Show:** the landing page. Point at the four big mood faces, the large text, the
-suggestion buttons, and the fact that the text box works on its own.
-
-**Say:** "Everything is tappable for small hands, nothing needs a microphone — and
-it already fits this window at 100% zoom. The input box stays at the bottom no
-matter how long you talk."
+> **Pace.** Speak slowly and let the pauses sit. The app is doing the work in
+> front of the audience; you don't have to fill every second with words. All the
+> plain numbers, in case anyone asks, are at the bottom.
 
 ---
 
-## 0:15 – 0:25 · A warm start (10s)
+## 0:00 – 0:15 · Meet Buddy *(15s)*
 
-**Type:** `hello buddy`
+*Do:* leave the page alone and let the audience look at it.
 
-**Say:** "That is a **Conversation** turn — the mode badge says so. Unclear
-signals default to chat, never to a lesson."
+**Say:** "This is Buddy — an English tutor for children under seven. Before I show
+you what he does, here's the one idea underneath all of it: **the software decides
+what happens, and the AI only says it.** Everything you're about to see is live."
 
-**Point at:** that Buddy **spoke**. "That voice is a neural voice synthesised on
-the server, not the browser's robot voice."
-
----
-
-## 0:25 – 0:43 · Support outranks everything (18s)
-
-**Type:** `I feel sad`
-
-**Say:** "Now watch the mode badge. That is **Support**, the highest-priority mode
-— above Engagement, Conversation and Learning."
-
-**Point at:** the reply, and that there is **no question and no quiz**.
-
-**Say:** "A sad child is never drilled. And note the latency: zero milliseconds of
-model time. Support turns never call the model at all — the comfort line is a
-hand-written constant, so it is both faster and safer."
+*What they should notice:* four big mood faces, large friendly text, buttons a small
+child can hit. Nothing here needs a microphone.
 
 ---
 
-## 0:43 – 1:00 · Learning (17s)
+## 0:15 – 0:25 · A friendly hello *(10s)*
 
-**Type:** `let's learn`
+*Do:* type `hello buddy`.
 
-**Say:** "**Learning** mode. Buddy asks for one word."
-
-**Type:** `cat`
-
-**Say:** "Correct — praise for the word just said, then the *next* word. The model
-is told the answered word and the target word as two separate fields, so it can
-never say 'Yes! dog!' after the child said 'cat'."
+**Say:** "Watch the badge — **Conversation**, not Lesson. When Buddy isn't sure what
+a child wants, he chats with them. He never turns a warm hello into a test."
 
 ---
 
-## 1:00 – 1:16 · A miss is never "wrong" (16s)
+## 0:25 – 0:41 · Comfort comes first *(16s)*
 
-**Type:** `apple`
+*Do:* type `I feel sad`.
 
-**Say:** "That is a miss. Watch the wording: **'Almost! Let's try together.'** The
-word *wrong* never appears anywhere in this app, and the engine never shames a
-child."
-
-**Point at:** the mode badge still reads Learning, and the level badge has not
-moved.
-
-**Say:** "The model could not have changed that — the score was already decided in
-Python before the model was asked to speak."
+**Say:** "Now the badge reads **Support** — and Support outranks everything else.
+Notice what's missing: no question, no quiz. A sad child is never drilled. That
+reply is written by hand rather than by the AI, so it arrives instantly — and it
+can't come out wrong."
 
 ---
 
-## 1:16 – 1:28 · Engagement, and the 3-turn ceiling (12s)
+## 0:41 – 0:56 · A lesson *(15s)*
 
-**Type:** `let's play a game`
+*Do:* type `let's learn`, then `cat`.
 
-**Say:** "**Engagement** — a play request is a game, not a lesson. Buddy is capped
-at **three learning turns in a row**: the engine forces a break, so a child can
-never be drilled."
-
----
-
-## 1:28 – 1:40 · The level control, for reviewing (12s)
-
-**Press:** `L3` in the header.
-
-**Say:** "A reviewer should not have to earn promotion to see level three, so
-there is a level control right here — labelled **demo control**, because it is not
-the rule."
-
-**Point at:** the reply, which already asks a level-3 sentence — **and that the voice
-starts with it**, not three seconds later.
-
-**Say:** "Switching clears that level's attempt counters so it starts clean, but it
-keeps the conversation and everything Buddy has learned about this child. It never
-calls the model — six milliseconds. And the audio is already composed: the server
-builds each level's opening line in the background, so the voice arrives with the
-text instead of after it."
+**Say:** "This is a lesson. Buddy asks for one word — and the answer is right, so he
+praises *that* word and moves on to the next. He's told the two words separately, so
+he can never congratulate a child for something they never said."
 
 ---
 
-## 1:40 – 1:50 · The session survives a refresh (10s)
+## 0:56 – 1:12 · The gentle miss *(16s)*
 
-**Press:** browser reload.
+*Do:* type `apple`.
 
-**Say:** "The server holds **no** child state. The session lives in the browser as
-an opaque blob, clamped field by field when it comes back. So a refresh, or a
-redeploy, or a new server instance resumes the same lesson — the level, the words,
-the streaks. Nothing is stored on the server, so there is nothing to leak."
-
----
-
-## 1:50 – 2:00 · Close (10s)
-
-**Switch to:** the architecture page in the other tab.
-
-**Say:** "Safety, then mode, then scoring and progression, then the fallback reply —
-all of it deterministic. Only the last step can call the model, and it is bounded
-by a hard timeout. If the model is slow, rate-limited or completely down, the child
-still gets a safe reply. One container, one process, no database. Thank you."
+**Say:** "That one's a miss — and listen to the words he chooses: *'Almost! Let's try
+together.'* The word **wrong** doesn't appear anywhere in this app. And the score was
+settled *before* the AI was asked to speak, so it cannot soften it, and it cannot
+change it."
 
 ---
 
-## If something goes wrong live
+## 1:12 – 1:24 · Play, and the built-in brake *(12s)*
 
-| Symptom | What to say |
+*Do:* type `let's play a game`.
+
+**Say:** "Ask for a game and you get a game — not another lesson. Buddy will never
+ask more than three questions in a row either. That brake lives in the software, not
+in the AI's judgement."
+
+---
+
+## 1:24 – 1:36 · Switching levels *(12s)*
+
+*Do:* press `L3` in the header.
+
+**Say:** "For reviewing, I can jump straight to the hardest level. And listen —
+**the voice starts as the words arrive.** That matters more than it sounds: a child
+who can't read yet needs to *hear* the lesson, not wait for it."
+
+*What they should notice:* text and voice land together. The button says **demo
+control**, because the real progression rules still apply.
+
+---
+
+## 1:36 – 1:46 · Refresh *(10s)*
+
+*Do:* reload the page.
+
+**Say:** "I'll reload. Nothing is lost — same level, same words, same progress. The
+lesson lives in the child's browser, so there's no personal information about a
+child sitting on a server."
+
+---
+
+## 1:46 – 2:00 · Close *(14s)*
+
+*Do:* switch to the architecture tab.
+
+**Say:** "Everything you saw follows one order. Keep the child safe. Decide what
+happens. Mark the answer. *Then* let the AI speak — and if it's slow, or rate-limited,
+or down entirely, a child still gets a kind, safe answer. One small service. No
+database. Thank you."
+
+---
+
+## If something hiccups
+
+Don't apologise and don't stop. Say what's happening in plain words and keep the
+demo moving — every one of these is a designed behaviour, not a fault.
+
+| If you see | Say |
 | --- | --- |
-| A reply sounds like a template | "That is the deterministic fallback — the model was too slow, so the pre-built safe reply ran instead. The child still gets an answer, and the turn stays inside the two-second budget." |
-| A provider error | "The provider chain moved to the backup; if both fail, the fallback speaks. Nothing a child sees depends on an API being healthy." |
-| Slow first response | Point at the metrics endpoint and note it is the first request after a cold start; the service runs with `min-instances=1` to avoid this. |
-| The audio is late | "Speech is off the critical path — the text renders first and the audio is fetched after, so text latency is unaffected. A phrase Buddy has said before is served from cache in zero milliseconds, and every line is pre-composed as soon as the server knows it — which is why a level jump speaks immediately." |
-| Why is a *new* sentence slower? | "The neural voice is a round trip to the synthesiser: about three seconds cold, zero from cache. Streaming, connection pooling and a browser websocket were each measured and each changed nothing, so the fix is to never synthesise the same sentence twice." |
-| The voice changes to a different person | "That is the browser fallback, used only if the neural voice is genuinely unreachable — it is pinned to a non-male voice so it does not change gender. A single slow phrase no longer switches it." |
-| No sound at all | "The neural voice is unreachable, so the browser voice has taken over. Audio is an enhancement, never a dependency." |
+| The reply sounds a little generic | "That's the reply the app writes itself. If the AI is too slow, this is what a child hears — still kind, still correct." |
+| The words appear, then the voice a moment later | "Buddy writes the words instantly; the voice follows a beat behind. A sentence he's said before is instant, and so is changing level." |
+| A different-sounding voice | "That's the computer's own voice. It only steps in if Buddy's voice can't be reached at all." |
+| No sound whatsoever | "The app has fallen back to the computer's voice — or to silence. Sound is a bonus here, never a requirement." |
+| The first reply feels slow | "That's the very first request after the service wakes up. It stays warm after that." |
+| You're running long | Drop the **Play** beat. The close matters more. |
+| You're running short | Ask a wrong answer twice, so the audience sees the level stay put and the encouragement repeat. |
 
-## Numbers to have ready
+---
 
-- **306** offline tests.
-- **App turn time: p50 589 ms, p95 792 ms, hard-capped at 1804 ms** — 417 live
-  turns as recorded by the engine itself.
-- **End-to-end from a workstation: p50 ≈ 1.08 s, p95 ≈ 1.3–1.6 s**, of which
-  ≈0.45 s is the network hop (measured with bare `GET /api/health` probes).
-- **99.2%** of model calls succeeded (388/391); the fallback spoke on 7% of
-  turns, and 26 of those 29 were Support turns that never call the model.
-- **Speech:** cold synthesis p50 **3.3 s** server-side (n=6, max 4.9 s), **0 ms** on a
-  cache hit. The client waits 9 s — above the server's own 8 s ceiling, so the
-  server decides — and only then uses the browser voice. A warm level jump returns
-  its audio in **19–46 ms**. Measured with `scripts/speech_probe.py` and against the
-  live revision.
-- **Layout:** the page never scrolls at 1366×768, 1280×720 or 390×844; the composer
-  is always inside the viewport. Measured with `scripts/layout_check.js`.
-- **Level jump: ~6 ms**, no model call.
-- Curriculum: **3 levels, 42 items**, version `2026.10.1`.
-- **Support turns call the model zero times** — 0 ms.
+## Numbers, in plain words
+
+Only for questions from the floor. Everything below was measured, not estimated.
+
+- **306 automated tests**, and they all run offline — no network, no keys.
+- **A typical reply takes about half a second.** The slowest recorded was 1.8
+  seconds, and the AI is cut off hard at that point. *(p50 589 ms, p95 792 ms over
+  417 live turns.)*
+- **From a real browser, about a second end to end** — roughly half of which is
+  simply the distance to the server. *(p50 ≈ 1.08 s.)*
+- **The AI answered 388 of the 391 times it was asked** — 99.2%. The rest fell back
+  to the app's own written reply.
+- **Comfort replies never touch the AI at all** — that path is instant and offline.
+- **Changing level costs about six milliseconds** and involves no AI whatsoever.
+- **Buddy's voice** takes roughly three seconds the first time he says something
+  new, and nothing at all after that, because it's remembered. That's why a level
+  change speaks immediately.
+- **It fits a laptop at 100% zoom** — 1366×768 and 1280×720 — and a phone at
+  390×844. The page itself never scrolls; only the conversation does.
+- **Three levels, 42 learning items** — single words, short sentences and a few open
+  questions — versioned as `2026.10.1`.
